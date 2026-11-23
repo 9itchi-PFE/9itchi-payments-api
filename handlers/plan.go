@@ -22,6 +22,18 @@ func ListPlans(svc services.PlanService) gin.HandlerFunc {
 	}
 }
 
+// ListAllPlans: GET /admin/plans (admin) all plans including inactive.
+func ListAllPlans(svc services.PlanService) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		result, apiErr := svc.ListAllPlans(c.Request.Context())
+		if apiErr != nil {
+			models.FormatError(c, apiErr)
+			return
+		}
+		c.JSON(http.StatusOK, result)
+	}
+}
+
 // CreatePlan: POST /admin/plans (admin) create plan (price, duration, quotas).
 func CreatePlan(svc services.PlanService) gin.HandlerFunc {
 	return func(c *gin.Context) {

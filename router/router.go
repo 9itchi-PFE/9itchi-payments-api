@@ -42,6 +42,7 @@ func initializeRoutes(r *gin.Engine, services *services.Services) {
 	adminGroup := r.Group("/")
 	adminGroup.Use(AuthMiddleware(), RequireRole("admin"))
 	{
+		adminGroup.GET("/admin/plans", handlers.ListAllPlans(services.Plan))
 		adminGroup.POST("/admin/plans", handlers.CreatePlan(services.Plan))
 		adminGroup.PUT("/admin/plans/:id", handlers.UpdatePlan(services.Plan))
 		adminGroup.DELETE("/admin/plans/:id", handlers.DeactivatePlan(services.Plan))

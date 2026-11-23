@@ -1,0 +1,265 @@
+//go:build integration
+
+package repositories
+
+import (
+	"context"
+	"sync"
+	"sync/atomic"
+	"testing"
+	"time"
+
+	"9itchi-payments-api/models/db"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+)
+
+func newPromo(code string, usageLimit int, planIDs []string) *db.PromoCode {
+	if planIDs == nil {
+		planIDs = []string{}
+	}
+	now := time.Now()
+	return &db.PromoCode{Code: code, Type: "percentage", Value: 10, ValidFrom: now.Add(-time.Hour),
+		ValidUntil: now.Add(time.Hour), UsageLimit: usageLimit, PlanIDs: planIDs}
+}
+
+func TestPlanRepository(t *testing.T) {
+	store := newTestStore(t)
+	repo := NewPlanRepository(store)
+	ctx := context.Background()
+
+	free, err := repo.GetByName(ctx, "Free")
+	require.NoError(t, err)
+	assert.Equal(t, 0.0, free.Price)
+	assert.Equal(t, 36500, free.DurationDays)
+	assert.Equal(t, map[string]int{"emails_per_month": 20, "resumes": 3}, free.Quotas)
+
+	pro, err := repo.Create(ctx, &db.Plan{Name: "Pro", Price: 9.99, DurationDays: 30, Quotas: map[string]int{"resumes": 10}, Active: true})
+	require.NoError(t, err)
+	assert.Len(t, pro.ID, 36)
+	assert.InDelta(t, 9.99, pro.Price, 0.001)
+
+	_, err = repo.Create(ctx, &db.Plan{Name: "Pro", Price: 1, DurationDays: 1, Quotas: map[string]int{}, Active: true})
+	assert.ErrorIs(t, err, ErrConflict)
+
+	_, err = repo.Create(ctx, &db.Plan{Name: "Bad", Price: -1, DurationDays: 1, Quotas: map[string]int{}})
+	assert.Error(t, err, "CHECK price >= 0")
+	_, err = repo.Create(ctx, &db.Plan{Name: "Bad", Price: 1, DurationDays: 0, Quotas: map[string]int{}})
+	assert.Error(t, err, "CHECK duration_days > 0")
+
+	updated, err := repo.Update(ctx, pro.ID, &db.Plan{Name: "Pro", Price: 12, DurationDays: 60, Quotas: map[string]int{"resumes": 20}, Active: true})
+	require.NoError(t, err)
+	assert.Equal(t, 60, updated.DurationDays)
+	assert.Equal(t, 20, updated.Quotas["resumes"])
+	assert.False(t, updated.UpdatedAt.Before(pro.UpdatedAt))
+
+	_, err = repo.Update(ctx, "00000000-0000-0000-0000-000000000000", &db.Plan{Name: "X", DurationDays: 1, Quotas: map[string]int{}})
+	assert.ErrorIs(t, err, ErrNotFound)
+
+	off, err := repo.Deactivate(ctx, pro.ID)
+	require.NoError(t, err)
+	assert.False(t, off.Active)
+
+	active, err := repo.List(ctx, true)
+	require.NoError(t, err)
+	require.Len(t, active, 1)
+	assert.Equal(t, "Free", active[0].Name)
+
+	all, err := repo.List(ctx, false)
+	require.NoError(t, err)
+	assert.Len(t, all, 2)
+
+	_, err = repo.GetByID(ctx, "00000000-0000-0000-0000-000000000000")
+	assert.ErrorIs(t, err, ErrNotFound)
+}
+
+func TestPromoRepositoryCRUD(t *testing.T) {
+	store := newTestStore(t)
+	plans := NewPlanRepository(store)
+	repo := NewPromoRepository(store)
+	ctx := context.Background()
+
+	free, err := plans.GetByName(ctx, "Free")
+	require.NoError(t, err)
+
+	p, err := repo.Create(ctx, newPromo("WELCOME", 0, []string{free.ID}))
+	require.NoError(t, err)
+	assert.Equal(t, []string{free.ID}, p.PlanIDs)
+	assert.Equal(t, 0, p.UsedCount)
+
+	all, err := repo.Create(ctx, newPromo("ALLPLANS", 5, nil))
+	require.NoError(t, err)
+	assert.Empty(t, all.PlanIDs)
+
+	_, err = repo.Create(ctx, newPromo("WELCOME", 0, nil))
+	assert.ErrorIs(t, err, ErrConflict)
+
+	lower := newPromo("lower", 0, nil)
+	_, err = repo.Create(ctx, lower)
+	assert.Error(t, err, "CHECK code stored upper-case")
+
+	over := newPromo("OVER", 0, nil)
+	over.Value = 101
+	_, err = repo.Create(ctx, over)
+	assert.Error(t, err, "CHECK percentage <= 100")
+
+	fixedBig := newPromo("FIXEDBIG", 0, nil)
+	fixedBig.Type, fixedBig.Value = "fixed", 500
+	_, err = repo.Create(ctx, fixedBig)
+	assert.NoError(t, err, "fixed amount may exceed 100")
+
+	badDates := newPromo("DATES", 0, nil)
+	badDates.ValidFrom, badDates.ValidUntil = badDates.ValidUntil, badDates.ValidFrom
+	_, err = repo.Create(ctx, badDates)
+	assert.Error(t, err, "CHECK valid_from < valid_until")
+
+	badType := newPromo("TYPE", 0, nil)
+	badType.Type = "weird"
+	_, err = repo.Create(ctx, badType)
+	assert.Error(t, err, "CHECK type")
+
+	got, err := repo.GetByCode(ctx, "WELCOME")
+	require.NoError(t, err)
+	assert.Equal(t, p.ID, got.ID)
+	_, err = repo.GetByCode(ctx, "NOPE")
+	assert.ErrorIs(t, err, ErrNotFound)
+
+	upd := newPromo("WELCOME2", 3, nil)
+	upd.Value = 25
+	out, err := repo.Update(ctx, p.ID, upd)
+	require.NoError(t, err)
+	assert.Equal(t, "WELCOME2", out.Code)
+	assert.Equal(t, 3, out.UsageLimit)
+	assert.Empty(t, out.PlanIDs)
+
+	list, err := repo.List(ctx)
+	require.NoError(t, err)
+	assert.Len(t, list, 3)
+
+	require.NoError(t, repo.Delete(ctx, p.ID))
+	assert.ErrorIs(t, repo.Delete(ctx, p.ID), ErrNotFound)
+	_, err = repo.GetByID(ctx, p.ID)
+	assert.ErrorIs(t, err, ErrNotFound)
+}
+
+func TestPromoIncrementUsage(t *testing.T) {
+	store := newTestStore(t)
+	repo := NewPromoRepository(store)
+	ctx := context.Background()
+
+	limited, err := repo.Create(ctx, newPromo("LIMITED", 2, nil))
+	require.NoError(t, err)
+	unlimited, err := repo.Create(ctx, newPromo("UNLIMITED", 0, nil))
+	require.NoError(t, err)
+
+	for i := 0; i < 2; i++ {
+		applied, err := repo.IncrementUsage(ctx, limited.ID)
+		require.NoError(t, err)
+		assert.True(t, applied, "use %d", i+1)
+	}
+	applied, err := repo.IncrementUsage(ctx, limited.ID)
+	require.NoError(t, err)
+	assert.False(t, applied, "limit reached")
+	got, err := repo.GetByID(ctx, limited.ID)
+	require.NoError(t, err)
+	assert.Equal(t, 2, got.UsedCount)
+
+	for i := 0; i < 5; i++ {
+		applied, err := repo.IncrementUsage(ctx, unlimited.ID)
+		require.NoError(t, err)
+		assert.True(t, applied)
+	}
+	got, err = repo.GetByID(ctx, unlimited.ID)
+	require.NoError(t, err)
+	assert.Equal(t, 5, got.UsedCount)
+
+	applied, err = repo.IncrementUsage(ctx, "00000000-0000-0000-0000-000000000000")
+	require.NoError(t, err)
+	assert.False(t, applied, "unknown id")
+}
+
+func TestPromoIncrementUsageConcurrent(t *testing.T) {
+	store := newTestStore(t)
+	repo := NewPromoRepository(store)
+	ctx := context.Background()
+
+	p, err := repo.Create(ctx, newPromo("RACE", 3, nil))
+	require.NoError(t, err)
+
+	var wg sync.WaitGroup
+	var ok atomic.Int64
+	for i := 0; i < 10; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			applied, err := repo.IncrementUsage(ctx, p.ID)
+			if err == nil && applied {
+				ok.Add(1)
+			}
+		}()
+	}
+	wg.Wait()
+	assert.EqualValues(t, 3, ok.Load(), "exactly usage_limit increments succeed")
+	got, err := repo.GetByID(ctx, p.ID)
+	require.NoError(t, err)
+	assert.Equal(t, 3, got.UsedCount)
+}
+
+func TestSubscriptionRepositoryActive(t *testing.T) {
+	store := newTestStore(t)
+	plans := NewPlanRepository(store)
+	subs := NewSubscriptionRepository(store)
+	ctx := context.Background()
+	const user = "44444444-4444-4444-4444-444444444444"
+	const other = "55555555-5555-5555-5555-555555555555"
+
+	_, err := subs.GetActiveByUser(ctx, user)
+	assert.ErrorIs(t, err, ErrNotFound)
+
+	pro, err := plans.Create(ctx, &db.Plan{Name: "Pro", Price: 10, DurationDays: 30, Quotas: map[string]int{"resumes": 10}, Active: true})
+	require.NoError(t, err)
+
+	insert := func(uid, status string, ends time.Duration) error {
+		_, err := store.Conn(ctx).Exec(ctx,
+			`INSERT INTO subscriptions (user_id, plan_id, status, amount, starts_at, ends_at)
+			 VALUES ($1, $2, $3, 10, now() - interval '40 days', now() + $4 * interval '1 second')`,
+			uid, pro.ID, status, int(ends.Seconds()))
+		return err
+	}
+
+	require.NoError(t, insert(user, "expired", -time.Hour))
+	require.NoError(t, insert(user, "cancelled", time.Hour))
+	require.NoError(t, insert(user, "pending", time.Hour))
+	_, err = subs.GetActiveByUser(ctx, user)
+	assert.ErrorIs(t, err, ErrNotFound, "only active counts")
+
+	require.NoError(t, insert(user, "active", time.Hour))
+	assert.Error(t, insert(user, "active", time.Hour), "unique index: one active subscription per user")
+	require.NoError(t, insert(other, "active", time.Hour), "another user is unaffected")
+	assert.Error(t, insert(other, "bogus", time.Hour), "CHECK status")
+
+	got, err := subs.GetActiveByUser(ctx, user)
+	require.NoError(t, err)
+	assert.Equal(t, user, got.UserID)
+	assert.Equal(t, pro.ID, got.PlanID)
+	assert.Nil(t, got.PromoCodeID)
+	assert.Equal(t, "active", got.Status)
+}
+
+func TestSubscriptionActiveIgnoresLapsed(t *testing.T) {
+	store := newTestStore(t)
+	plans := NewPlanRepository(store)
+	subs := NewSubscriptionRepository(store)
+	ctx := context.Background()
+	const user = "66666666-6666-6666-6666-666666666666"
+
+	free, err := plans.GetByName(ctx, "Free")
+	require.NoError(t, err)
+	_, err = store.Conn(ctx).Exec(ctx,
+		`INSERT INTO subscriptions (user_id, plan_id, status, amount, starts_at, ends_at)
+		 VALUES ($1, $2, 'active', 0, now() - interval '2 days', now() - interval '1 day')`, user, free.ID)
+	require.NoError(t, err)
+	_, err = subs.GetActiveByUser(ctx, user)
+	assert.ErrorIs(t, err, ErrNotFound, "status active but ends_at in the past")
+}

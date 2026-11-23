@@ -10,6 +10,8 @@ type Subscription struct {
 	PromoCodeID *string   `db:"promo_code_id" json:"promo_code_id"`
 	Status      string    `db:"status" json:"status"`
 	Amount      float64   `db:"amount" json:"amount"`
+	StartsAt    time.Time `db:"starts_at" json:"starts_at"`
+	EndsAt      time.Time `db:"ends_at" json:"ends_at"`
 	CreatedAt   time.Time `db:"created_at" json:"created_at"`
 	UpdatedAt   time.Time `db:"updated_at" json:"updated_at"`
 }

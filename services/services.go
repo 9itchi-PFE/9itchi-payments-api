@@ -21,9 +21,9 @@ type Clients struct {
 
 func InitServices(config utils.AppConfig, repos *repositories.Repositories) *Services {
 	return &Services{
-		Plan:         NewPlanService(repos.Plan),
-		Promo:        NewPromoService(repos.Promo),
-		Subscription: NewSubscriptionService(repos.Subscription),
+		Plan:         NewPlanService(repos.Plan, repos.Subscription),
+		Promo:        NewPromoService(repos.Promo, repos.Plan),
+		Subscription: NewSubscriptionService(repos.Subscription, repos.Plan),
 		Clients: &Clients{
 			Account: account.New(config.AccountAPIURL, config.InternalAPIKey),
 		},

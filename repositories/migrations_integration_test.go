@@ -16,7 +16,11 @@ func TestMigrationsCreateTables(t *testing.T) {
 	for _, table := range []string{"plans", "promo_codes", "subscriptions"} {
 		var n int
 		require.NoError(t, store.Conn(ctx).QueryRow(ctx, "SELECT count(*) FROM "+table).Scan(&n), table)
-		assert.Equal(t, 0, n)
+		if table == "plans" {
+			assert.Equal(t, 1, n, "Free plan is seeded")
+		} else {
+			assert.Equal(t, 0, n)
+		}
 	}
 }
 

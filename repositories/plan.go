@@ -1,8 +1,25 @@
 package repositories
 
+import (
+	"context"
+
+	"9itchi-payments-api/models/db"
+
+	"github.com/jackc/pgx/v5"
+)
+
+const planColumns = `id, name, price, duration_days, quotas, active, created_at, updated_at`
+
 // PlanRepository is the only layer that touches PostgreSQL for plan data.
-// Use store.Conn(ctx), a context from QueryTimeout, and return MapError(err).
 type PlanRepository interface {
+	// List returns plans ordered by price; onlyActive filters out deactivated ones.
+	List(ctx context.Context, onlyActive bool) ([]db.Plan, error)
+	GetByID(ctx context.Context, id string) (*db.Plan, error)
+	GetByName(ctx context.Context, name string) (*db.Plan, error)
+	Create(ctx context.Context, p *db.Plan) (*db.Plan, error)
+	Update(ctx context.Context, id string, p *db.Plan) (*db.Plan, error)
+	// Deactivate sets active=false (soft delete).
+	Deactivate(ctx context.Context, id string) (*db.Plan, error)
 }
 
 type planRepository struct {
@@ -11,4 +28,76 @@ type planRepository struct {
 
 func NewPlanRepository(store *Store) PlanRepository {
 	return &planRepository{store: store}
+}
+
+func (r *planRepository) List(ctx context.Context, onlyActive bool) ([]db.Plan, error) {
+	ctx, cancel := QueryTimeout(ctx)
+	defer cancel()
+	rows, err := r.store.Conn(ctx).Query(ctx,
+		`SELECT `+planColumns+` FROM plans WHERE ($1 = false OR active) ORDER BY price, name`, onlyActive)
+	if err != nil {
+		return nil, MapError(err)
+	}
+	plans, err := pgx.CollectRows(rows, pgx.RowToStructByName[db.Plan])
+	return plans, MapError(err)
+}
+
+func (r *planRepository) GetByID(ctx context.Context, id string) (*db.Plan, error) {
+	ctx, cancel := QueryTimeout(ctx)
+	defer cancel()
+	rows, err := r.store.Conn(ctx).Query(ctx, `SELECT `+planColumns+` FROM plans WHERE id = $1`, id)
+	if err != nil {
+		return nil, MapError(err)
+	}
+	p, err := pgx.CollectOneRow(rows, pgx.RowToAddrOfStructByName[db.Plan])
+	return p, MapError(err)
+}
+
+func (r *planRepository) GetByName(ctx context.Context, name string) (*db.Plan, error) {
+	ctx, cancel := QueryTimeout(ctx)
+	defer cancel()
+	rows, err := r.store.Conn(ctx).Query(ctx, `SELECT `+planColumns+` FROM plans WHERE name = $1`, name)
+	if err != nil {
+		return nil, MapError(err)
+	}
+	p, err := pgx.CollectOneRow(rows, pgx.RowToAddrOfStructByName[db.Plan])
+	return p, MapError(err)
+}
+
+func (r *planRepository) Create(ctx context.Context, p *db.Plan) (*db.Plan, error) {
+	ctx, cancel := QueryTimeout(ctx)
+	defer cancel()
+	rows, err := r.store.Conn(ctx).Query(ctx,
+		`INSERT INTO plans (name, price, duration_days, quotas, active) VALUES ($1, $2, $3, $4, $5)
+		 RETURNING `+planColumns, p.Name, p.Price, p.DurationDays, p.Quotas, p.Active)
+	if err != nil {
+		return nil, MapError(err)
+	}
+	out, err := pgx.CollectOneRow(rows, pgx.RowToAddrOfStructByName[db.Plan])
+	return out, MapError(err)
+}
+
+func (r *planRepository) Update(ctx context.Context, id string, p *db.Plan) (*db.Plan, error) {
+	ctx, cancel := QueryTimeout(ctx)
+	defer cancel()
+	rows, err := r.store.Conn(ctx).Query(ctx,
+		`UPDATE plans SET name = $2, price = $3, duration_days = $4, quotas = $5, active = $6, updated_at = now()
+		 WHERE id = $1 RETURNING `+planColumns, id, p.Name, p.Price, p.DurationDays, p.Quotas, p.Active)
+	if err != nil {
+		return nil, MapError(err)
+	}
+	out, err := pgx.CollectOneRow(rows, pgx.RowToAddrOfStructByName[db.Plan])
+	return out, MapError(err)
+}
+
+func (r *planRepository) Deactivate(ctx context.Context, id string) (*db.Plan, error) {
+	ctx, cancel := QueryTimeout(ctx)
+	defer cancel()
+	rows, err := r.store.Conn(ctx).Query(ctx,
+		`UPDATE plans SET active = false, updated_at = now() WHERE id = $1 RETURNING `+planColumns, id)
+	if err != nil {
+		return nil, MapError(err)
+	}
+	out, err := pgx.CollectOneRow(rows, pgx.RowToAddrOfStructByName[db.Plan])
+	return out, MapError(err)
 }
