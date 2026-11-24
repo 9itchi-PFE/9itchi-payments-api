@@ -125,6 +125,7 @@ type SubscriptionRepository struct {
 	GetActiveByUserFn func(ctx context.Context, userID string) (*db.Subscription, error)
 	CreateFn          func(ctx context.Context, s *db.Subscription) (*db.Subscription, error)
 	ExtendFn          func(ctx context.Context, id string, endsAt time.Time) error
+	AddDaysFn         func(ctx context.Context, id string, days int) (*db.Subscription, error)
 	ExpireActiveFn    func(ctx context.Context, userID string) error
 	SetRenewalFn      func(ctx context.Context, userID string, renews bool) (*db.Subscription, error)
 	LastEndedFn       func(ctx context.Context, userID string) (*db.Subscription, error)
@@ -330,4 +331,41 @@ func (m *SubscriptionRepository) ReleaseReminder(ctx context.Context, subscripti
 		return nil
 	}
 	return m.ReleaseReminderFn(ctx, subscriptionID, stage)
+}
+
+func (m *SubscriptionRepository) AddDays(ctx context.Context, id string, days int) (*db.Subscription, error) {
+	if m.AddDaysFn == nil {
+		return nil, nil
+	}
+	return m.AddDaysFn(ctx, id, days)
+}
+
+// GiftRepository keeps what was created; ListFn and CreateErr replace the defaults.
+type GiftRepository struct {
+	Locked    []string
+	Created   []*db.Gift
+	CreateErr error
+	ListFn    func(ctx context.Context, userID string, limit int) ([]db.Gift, error)
+}
+
+func (m *GiftRepository) LockUser(_ context.Context, userID string) error {
+	m.Locked = append(m.Locked, userID)
+	return nil
+}
+
+func (m *GiftRepository) Create(_ context.Context, g *db.Gift) (*db.Gift, error) {
+	if m.CreateErr != nil {
+		return nil, m.CreateErr
+	}
+	out := *g
+	out.ID = "gift-1"
+	m.Created = append(m.Created, &out)
+	return &out, nil
+}
+
+func (m *GiftRepository) ListByUser(ctx context.Context, userID string, limit int) ([]db.Gift, error) {
+	if m.ListFn == nil {
+		return nil, nil
+	}
+	return m.ListFn(ctx, userID, limit)
 }

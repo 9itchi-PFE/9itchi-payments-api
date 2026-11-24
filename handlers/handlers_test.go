@@ -356,3 +356,48 @@ func TestSendRenewalRemindersHandler(t *testing.T) {
 	assert.Equal(t, http.StatusOK, w.Code)
 	assert.JSONEq(t, `{"due":2,"lapsed":1,"failed":0}`, w.Body.String())
 }
+
+type mockGiftSvc struct {
+	admin, student string
+}
+
+func (m *mockGiftSvc) GiveMonth(_ context.Context, adminID, userID string) (*api.GiftResponse, *models.ApiError) {
+	m.admin, m.student = adminID, userID
+	if userID == "nope" {
+		return nil, &models.ApiError{Code: http.StatusBadRequest, Error: errors.New("invalid user id")}
+	}
+	if userID == "twice" {
+		return nil, &models.ApiError{Code: http.StatusConflict, Error: errors.New("a month was just given to this student")}
+	}
+	return &api.GiftResponse{ID: "g1", PlanName: "Pro", Days: 30, GivenBy: adminID}, nil
+}
+func (m *mockGiftSvc) ListGifts(_ context.Context, userID string) (*api.GiftListResponse, *models.ApiError) {
+	if userID == "nope" {
+		return nil, &models.ApiError{Code: http.StatusBadRequest, Error: errors.New("invalid user id")}
+	}
+	return &api.GiftListResponse{Items: []api.GiftResponse{{ID: "g1", PlanName: "Pro", Days: 30}}}, nil
+}
+
+// The month goes to the student named in the path, given by the admin of the token.
+func TestGiftHandlers(t *testing.T) {
+	const student = "7c9e6679-7425-40de-944b-e07fc1f90ae7"
+	svc := &mockGiftSvc{}
+	w := do(http.MethodPost, "/admin/users/:id/gifts", "/admin/users/"+student+"/gifts", "", GiveMonth(svc))
+	assert.Equal(t, http.StatusCreated, w.Code)
+	assert.Equal(t, "u-1", svc.admin)
+	assert.Equal(t, student, svc.student)
+	assert.Contains(t, w.Body.String(), `"plan_name":"Pro"`)
+	assert.Contains(t, w.Body.String(), `"days":30`)
+
+	w = do(http.MethodPost, "/admin/users/:id/gifts", "/admin/users/nope/gifts", "", GiveMonth(svc))
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	w = do(http.MethodPost, "/admin/users/:id/gifts", "/admin/users/twice/gifts", "", GiveMonth(svc))
+	assert.Equal(t, http.StatusConflict, w.Code)
+	assert.Contains(t, w.Body.String(), `"error":"a month was just given to this student"`)
+
+	w = do(http.MethodGet, "/admin/users/:id/gifts", "/admin/users/"+student+"/gifts", "", ListGifts(svc))
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Contains(t, w.Body.String(), `"items":[{"id":"g1"`)
+	w = do(http.MethodGet, "/admin/users/:id/gifts", "/admin/users/nope/gifts", "", ListGifts(svc))
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+}

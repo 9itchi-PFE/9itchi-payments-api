@@ -632,3 +632,93 @@ func TestPlanLaunchEnd(t *testing.T) {
 	}
 	assert.Equal(t, map[string]float64{over.ID: 50, still.ID: 35}, prices)
 }
+
+func TestGifts(t *testing.T) {
+	store := newTestStore(t)
+	plans := NewPlanRepository(store)
+	subs := NewSubscriptionRepository(store)
+	gifts := NewGiftRepository(store)
+	ctx := context.Background()
+	const user = "88888888-8888-8888-8888-888888888888"
+	const other = "99999999-9999-9999-9999-999999999999"
+	const admin = "00000000-0000-4000-8000-000000000001"
+
+	pro, err := plans.Create(ctx, &db.Plan{Name: "Pro", Price: 10, DurationDays: 30, Quotas: map[string]int{}, Active: true})
+	require.NoError(t, err)
+	now := time.Now().Truncate(time.Microsecond)
+
+	// A subscription given by the team is stopped from the start.
+	given, err := subs.Create(ctx, &db.Subscription{UserID: other, PlanID: pro.ID, StartsAt: now, EndsAt: now.AddDate(0, 0, 30), StoppedAt: &now})
+	require.NoError(t, err)
+	require.NotNil(t, given.StoppedAt)
+	assert.WithinDuration(t, now, *given.StoppedAt, time.Millisecond)
+
+	// Days added to a running subscription leave its renewal as it was.
+	sub, err := subs.Create(ctx, &db.Subscription{UserID: user, PlanID: pro.ID, Amount: 10, StartsAt: now, EndsAt: now.AddDate(0, 0, 10)})
+	require.NoError(t, err)
+	_, err = subs.SetRenewal(ctx, user, false)
+	require.NoError(t, err)
+	moved, err := subs.AddDays(ctx, sub.ID, 30)
+	require.NoError(t, err)
+	assert.WithinDuration(t, sub.EndsAt.AddDate(0, 0, 30), moved.EndsAt, time.Hour+time.Second, "30 days later (an hour apart at most on a clock change)")
+	assert.NotNil(t, moved.StoppedAt, "still stopped")
+	_, err = subs.AddDays(ctx, "00000000-0000-0000-0000-000000000000", 30)
+	assert.ErrorIs(t, err, ErrNotFound)
+
+	none, err := gifts.ListByUser(ctx, user, 10)
+	require.NoError(t, err)
+	assert.Empty(t, none)
+
+	first, err := gifts.Create(ctx, &db.Gift{UserID: user, SubscriptionID: sub.ID, PlanID: pro.ID, Days: 30, GivenBy: admin,
+		PeriodStart: sub.EndsAt, PeriodEnd: moved.EndsAt})
+	require.NoError(t, err)
+	assert.NotEmpty(t, first.ID)
+	assert.Equal(t, admin, first.GivenBy)
+	second, err := gifts.Create(ctx, &db.Gift{UserID: user, SubscriptionID: sub.ID, PlanID: pro.ID, Days: 30, GivenBy: admin,
+		PeriodStart: moved.EndsAt, PeriodEnd: moved.EndsAt.AddDate(0, 0, 30)})
+	require.NoError(t, err)
+	_, err = gifts.Create(ctx, &db.Gift{UserID: other, SubscriptionID: given.ID, PlanID: pro.ID, Days: 30, GivenBy: admin,
+		PeriodStart: now, PeriodEnd: now.AddDate(0, 0, 30)})
+	require.NoError(t, err)
+
+	list, err := gifts.ListByUser(ctx, user, 10)
+	require.NoError(t, err)
+	require.Len(t, list, 2, "only this student's")
+	assert.ElementsMatch(t, []string{first.ID, second.ID}, []string{list[0].ID, list[1].ID})
+	one, err := gifts.ListByUser(ctx, user, 1)
+	require.NoError(t, err)
+	assert.Len(t, one, 1)
+
+	_, err = gifts.Create(ctx, &db.Gift{UserID: user, SubscriptionID: sub.ID, PlanID: pro.ID, Days: 0, GivenBy: admin,
+		PeriodStart: now, PeriodEnd: now.AddDate(0, 0, 30)})
+	assert.Error(t, err, "a gift gives at least a day")
+
+	// The lock is held until the transaction ends: a second gift to the same student waits for the first.
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	done := make(chan error, 1)
+	go func() {
+		done <- store.WithTx(ctx, func(ctx context.Context) error {
+			if err := gifts.LockUser(ctx, user); err != nil {
+				return err
+			}
+			close(entered)
+			<-release
+			return nil
+		})
+	}()
+	<-entered
+	waited := make(chan error, 1)
+	go func() {
+		waited <- store.WithTx(ctx, func(ctx context.Context) error { return gifts.LockUser(ctx, user) })
+	}()
+	require.NoError(t, store.WithTx(ctx, func(ctx context.Context) error { return gifts.LockUser(ctx, other) }), "another student is not held up")
+	select {
+	case err := <-waited:
+		t.Fatalf("the second gift did not wait for the first (err: %v)", err)
+	case <-time.After(300 * time.Millisecond):
+	}
+	close(release)
+	require.NoError(t, <-done)
+	require.NoError(t, <-waited)
+}
