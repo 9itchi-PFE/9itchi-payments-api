@@ -8,7 +8,7 @@ Payments go through the `flouci` provider (`core/flouci.go`, registered in `core
 
 Config (all optional): `FLOUCI_BASE_URL` (default `https://developers.flouci.com`), `FLOUCI_PUBLIC_KEY`, `FLOUCI_PRIVATE_KEY`, `FLOUCI_WEBHOOK_SECRET`, `FLOUCI_WEBHOOK_URL` (public URL of `/webhooks/flouci`, skipped when local), `FRONTEND_URL` (default `http://localhost:3000`).
 
-The migration seeds a `Free` plan (price 0, 36500 days, `emails_per_month` 20, `resumes` 3). It is the fallback for users with no active subscription and cannot be renamed or deactivated.
+The migrations seed a `Free` plan (price 0, 36500 days). Its quotas follow the product decision: `emails_per_month` 0 (no sending through 9itchi), `resumes` 1 (one CV version) and `cv_downloads` 1 (one free download, with the 9itchi logo). Paid plans are created by the admin (prices in TND). It is the fallback for users with no active subscription and cannot be renamed or deactivated.
 
 ## Endpoints
 
