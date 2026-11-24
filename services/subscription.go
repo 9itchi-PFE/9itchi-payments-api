@@ -234,6 +234,15 @@ func (s *subscriptionService) complete(ctx context.Context, pay *db.Payment) (ap
 // publish sends the domain events after commit; a failure is logged and never undoes the payment.
 func (s *subscriptionService) publish(ctx context.Context, pay *db.Payment, subCreated bool) {
 	payload := map[string]any{"user_id": pay.UserID, "plan_id": pay.PlanID, "payment_id": pay.ID, "amount_millimes": pay.AmountMillimes}
+	// What the receipt says, so that the email about it needs no second lookup. The payment is read again because
+	// completing it gave it its number and its period. Without it the event still goes, with the amounts only.
+	if done, err := s.payments.Get(ctx, pay.UserID, pay.ID); err == nil {
+		r := s.paymentResponse(ctx, done, map[string]*db.Plan{})
+		payload["receipt_no"], payload["plan_name"], payload["duration_days"] = r.ReceiptNo, r.PlanName, r.DurationDays
+		if r.PeriodStart != nil && r.PeriodEnd != nil {
+			payload["period_start"], payload["period_end"] = r.PeriodStart.UTC().Format(time.RFC3339), r.PeriodEnd.UTC().Format(time.RFC3339)
+		}
+	}
 	names := []string{core.EventPaymentCompleted}
 	if subCreated {
 		names = append(names, core.EventSubscriptionCreated)
