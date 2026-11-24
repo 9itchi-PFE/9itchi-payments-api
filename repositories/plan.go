@@ -8,7 +8,7 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-const planColumns = `id, name, price, regular_price, duration_days, quotas, active, created_at, updated_at`
+const planColumns = `id, name, price, regular_price, launch_ends_on, duration_days, quotas, active, created_at, updated_at`
 
 // PlanRepository is the only layer that touches PostgreSQL for plan data.
 type PlanRepository interface {
@@ -68,8 +68,8 @@ func (r *planRepository) Create(ctx context.Context, p *db.Plan) (*db.Plan, erro
 	ctx, cancel := QueryTimeout(ctx)
 	defer cancel()
 	rows, err := r.store.Conn(ctx).Query(ctx,
-		`INSERT INTO plans (name, price, regular_price, duration_days, quotas, active) VALUES ($1, $2, $3, $4, $5, $6)
-		 RETURNING `+planColumns, p.Name, p.Price, p.RegularPrice, p.DurationDays, p.Quotas, p.Active)
+		`INSERT INTO plans (name, price, regular_price, launch_ends_on, duration_days, quotas, active) VALUES ($1, $2, $3, $4, $5, $6, $7)
+		 RETURNING `+planColumns, p.Name, p.Price, p.RegularPrice, p.LaunchEndsOn, p.DurationDays, p.Quotas, p.Active)
 	if err != nil {
 		return nil, MapError(err)
 	}
@@ -81,8 +81,8 @@ func (r *planRepository) Update(ctx context.Context, id string, p *db.Plan) (*db
 	ctx, cancel := QueryTimeout(ctx)
 	defer cancel()
 	rows, err := r.store.Conn(ctx).Query(ctx,
-		`UPDATE plans SET name = $2, price = $3, regular_price = $4, duration_days = $5, quotas = $6, active = $7, updated_at = now()
-		 WHERE id = $1 RETURNING `+planColumns, id, p.Name, p.Price, p.RegularPrice, p.DurationDays, p.Quotas, p.Active)
+		`UPDATE plans SET name = $2, price = $3, regular_price = $4, launch_ends_on = $5, duration_days = $6, quotas = $7, active = $8, updated_at = now()
+		 WHERE id = $1 RETURNING `+planColumns, id, p.Name, p.Price, p.RegularPrice, p.LaunchEndsOn, p.DurationDays, p.Quotas, p.Active)
 	if err != nil {
 		return nil, MapError(err)
 	}

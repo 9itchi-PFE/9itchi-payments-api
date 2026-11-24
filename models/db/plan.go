@@ -4,10 +4,13 @@ import "time"
 
 // Plan maps table plans.
 type Plan struct {
-	ID           string         `db:"id" json:"id"`
-	Name         string         `db:"name" json:"name"`
-	Price        float64        `db:"price" json:"price"`
-	RegularPrice *float64       `db:"regular_price" json:"regular_price"`
+	ID           string   `db:"id" json:"id"`
+	Name         string   `db:"name" json:"name"`
+	Price        float64  `db:"price" json:"price"`
+	RegularPrice *float64 `db:"regular_price" json:"regular_price"`
+	// LaunchEndsOn is the last day Price is charged (a day, at midnight UTC); from the next day in Tunis the plan
+	// costs RegularPrice. Nil: no end.
+	LaunchEndsOn *time.Time     `db:"launch_ends_on" json:"launch_ends_on"`
 	DurationDays int            `db:"duration_days" json:"duration_days"`
 	Quotas       map[string]int `db:"quotas" json:"quotas"`
 	Active       bool           `db:"active" json:"active"`

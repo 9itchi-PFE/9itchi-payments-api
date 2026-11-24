@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"strings"
+	"time"
 
 	"9itchi-payments-api/models"
 	"9itchi-payments-api/models/api"
@@ -30,10 +31,11 @@ type PlanService interface {
 type planService struct {
 	repo repositories.PlanRepository
 	subs repositories.SubscriptionRepository
+	now  func() time.Time
 }
 
 func NewPlanService(repo repositories.PlanRepository, subs repositories.SubscriptionRepository) PlanService {
-	return &planService{repo: repo, subs: subs}
+	return &planService{repo: repo, subs: subs, now: time.Now}
 }
 
 func (s *planService) ListPlans(ctx context.Context) (*api.PlanListResponse, *models.ApiError) {
@@ -51,7 +53,12 @@ func (s *planService) list(ctx context.Context, onlyActive bool) (*api.PlanListR
 	}
 	items := make([]api.PlanResponse, 0, len(plans))
 	for i := range plans {
-		items = append(items, mapping.PlanToResponse(&plans[i]))
+		p := &plans[i]
+		if onlyActive {
+			// Students see what a plan costs today; the admin sees what was typed, the end of the launch included.
+			p = priceAt(p, s.now())
+		}
+		items = append(items, mapping.PlanToResponse(p))
 	}
 	return &api.PlanListResponse{Items: items}, nil
 }
@@ -82,11 +89,15 @@ func (s *planService) CreatePlan(ctx context.Context, _ string, req api.CreatePl
 	if apiErr := validatePlanFields(name, req.Price, req.RegularPrice, req.DurationDays, req.Quotas); apiErr != nil {
 		return nil, apiErr
 	}
+	ends, apiErr := launchEnd(req.LaunchEndsOn, req.RegularPrice)
+	if apiErr != nil {
+		return nil, apiErr
+	}
 	active := true
 	if req.Active != nil {
 		active = *req.Active
 	}
-	p, err := s.repo.Create(ctx, &db.Plan{Name: name, Price: req.Price, RegularPrice: req.RegularPrice, DurationDays: req.DurationDays, Quotas: req.Quotas, Active: active})
+	p, err := s.repo.Create(ctx, &db.Plan{Name: name, Price: req.Price, RegularPrice: req.RegularPrice, LaunchEndsOn: ends, DurationDays: req.DurationDays, Quotas: req.Quotas, Active: active})
 	if err != nil {
 		return nil, repoError(err, "plan not found")
 	}
@@ -102,6 +113,10 @@ func (s *planService) UpdatePlan(ctx context.Context, _ string, id string, req a
 	if apiErr := validatePlanFields(name, req.Price, req.RegularPrice, req.DurationDays, req.Quotas); apiErr != nil {
 		return nil, apiErr
 	}
+	ends, apiErr := launchEnd(req.LaunchEndsOn, req.RegularPrice)
+	if apiErr != nil {
+		return nil, apiErr
+	}
 	current, err := s.repo.GetByID(ctx, id)
 	if err != nil {
 		return nil, repoError(err, "plan not found")
@@ -114,7 +129,7 @@ func (s *planService) UpdatePlan(ctx context.Context, _ string, id string, req a
 	if current.Name == FreePlanName && (name != FreePlanName || !active) {
 		return nil, badRequest("the Free plan cannot be renamed or deactivated")
 	}
-	p, err := s.repo.Update(ctx, id, &db.Plan{Name: name, Price: req.Price, RegularPrice: req.RegularPrice, DurationDays: req.DurationDays, Quotas: req.Quotas, Active: active})
+	p, err := s.repo.Update(ctx, id, &db.Plan{Name: name, Price: req.Price, RegularPrice: req.RegularPrice, LaunchEndsOn: ends, DurationDays: req.DurationDays, Quotas: req.Quotas, Active: active})
 	if err != nil {
 		return nil, repoError(err, "plan not found")
 	}
