@@ -126,7 +126,8 @@ type SubscriptionRepository struct {
 	CreateFn          func(ctx context.Context, s *db.Subscription) (*db.Subscription, error)
 	ExtendFn          func(ctx context.Context, id string, endsAt time.Time) error
 	ExpireActiveFn    func(ctx context.Context, userID string) error
-	CancelFn          func(ctx context.Context, userID string) error
+	SetRenewalFn      func(ctx context.Context, userID string, renews bool) (*db.Subscription, error)
+	LastEndedFn       func(ctx context.Context, userID string) (*db.Subscription, error)
 }
 
 func (m *SubscriptionRepository) GetActiveByUser(ctx context.Context, userID string) (*db.Subscription, error) {
@@ -157,11 +158,18 @@ func (m *SubscriptionRepository) ExpireActive(ctx context.Context, userID string
 	return m.ExpireActiveFn(ctx, userID)
 }
 
-func (m *SubscriptionRepository) Cancel(ctx context.Context, userID string) error {
-	if m.CancelFn == nil {
-		return nil
+func (m *SubscriptionRepository) SetRenewal(ctx context.Context, userID string, renews bool) (*db.Subscription, error) {
+	if m.SetRenewalFn == nil {
+		return nil, repositories.ErrNotFound
 	}
-	return m.CancelFn(ctx, userID)
+	return m.SetRenewalFn(ctx, userID, renews)
+}
+
+func (m *SubscriptionRepository) LastEnded(ctx context.Context, userID string) (*db.Subscription, error) {
+	if m.LastEndedFn == nil {
+		return nil, repositories.ErrNotFound
+	}
+	return m.LastEndedFn(ctx, userID)
 }
 
 type PaymentRepository struct {

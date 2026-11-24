@@ -33,8 +33,10 @@ type SubscriptionService interface {
 	Checkout(ctx context.Context, userID string, req api.CheckoutRequest) (*api.CheckoutResponse, *models.ApiError)
 	// GET /subscriptions/me: active subscription with its plan, else the Free plan
 	MySubscription(ctx context.Context, userID string) (*api.MySubscriptionResponse, *models.ApiError)
-	// POST /subscriptions/cancel: cancel the active paid subscription now (Free fallback applies)
-	CancelSubscription(ctx context.Context, userID string) (*api.MessageResponse, *models.ApiError)
+	// POST /subscriptions/cancel: stop the renewal of the active paid subscription; access lasts until it ends
+	CancelSubscription(ctx context.Context, userID string) (*api.MySubscriptionResponse, *models.ApiError)
+	// POST /subscriptions/resume: renew again a subscription that was stopped and has not ended yet
+	ResumeSubscription(ctx context.Context, userID string) (*api.MySubscriptionResponse, *models.ApiError)
 	// GET /payments: the user's completed payments (receipts), newest first
 	ListPayments(ctx context.Context, userID string) (*api.PaymentListResponse, *models.ApiError)
 	// POST /payments/:id/verify: where a payment stands; a pending one is re-checked with the gateway and
@@ -250,11 +252,30 @@ func (s *subscriptionService) MySubscription(ctx context.Context, userID string)
 	resp := &api.MySubscriptionResponse{Plan: mapping.PlanToResponse(plan), IsFree: sub == nil}
 	if sub != nil {
 		resp.Subscription = mapping.SubscriptionToResponse(sub)
+		return resp, nil
+	}
+	// Nothing active: say whether a renewal is still waiting to be paid.
+	last, err := s.repo.LastEnded(ctx, userID)
+	if err != nil && !errors.Is(err, repositories.ErrNotFound) {
+		return nil, repoError(err, "plan not found")
+	}
+	if last != nil && last.StoppedAt == nil {
+		resp.Lapsed = mapping.SubscriptionToResponse(last)
 	}
 	return resp, nil
 }
 
-func (s *subscriptionService) CancelSubscription(ctx context.Context, userID string) (*api.MessageResponse, *models.ApiError) {
+func (s *subscriptionService) CancelSubscription(ctx context.Context, userID string) (*api.MySubscriptionResponse, *models.ApiError) {
+	return s.setRenewal(ctx, userID, false)
+}
+
+func (s *subscriptionService) ResumeSubscription(ctx context.Context, userID string) (*api.MySubscriptionResponse, *models.ApiError) {
+	return s.setRenewal(ctx, userID, true)
+}
+
+// setRenewal stops or resumes the renewal of the active paid subscription. Access never changes here: what was
+// paid for lasts until ends_at.
+func (s *subscriptionService) setRenewal(ctx context.Context, userID string, renews bool) (*api.MySubscriptionResponse, *models.ApiError) {
 	if !isUUID(userID) {
 		return nil, badRequest("invalid user id")
 	}
@@ -270,10 +291,10 @@ func (s *subscriptionService) CancelSubscription(ctx context.Context, userID str
 	if plan.Price <= 0 {
 		return nil, repoError(repositories.ErrNotFound, notFound)
 	}
-	if err := s.repo.Cancel(ctx, userID); err != nil {
+	if sub, err = s.repo.SetRenewal(ctx, userID, renews); err != nil {
 		return nil, repoError(err, notFound)
 	}
-	return &api.MessageResponse{Message: "subscription cancelled"}, nil
+	return &api.MySubscriptionResponse{Subscription: mapping.SubscriptionToResponse(sub), Plan: mapping.PlanToResponse(plan)}, nil
 }
 
 // maxReceipts bounds GET /payments (one payment a month: years of history).

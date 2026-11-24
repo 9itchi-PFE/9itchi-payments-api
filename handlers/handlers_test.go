@@ -82,8 +82,11 @@ func (m *mockSubSvc) VerifyPayment(_ context.Context, _ string, id string) (*api
 func (m *mockSubSvc) MySubscription(_ context.Context, uid string) (*api.MySubscriptionResponse, *models.ApiError) {
 	return m.me(uid)
 }
-func (m *mockSubSvc) CancelSubscription(context.Context, string) (*api.MessageResponse, *models.ApiError) {
-	return &api.MessageResponse{Message: "subscription cancelled"}, nil
+func (m *mockSubSvc) CancelSubscription(context.Context, string) (*api.MySubscriptionResponse, *models.ApiError) {
+	return &api.MySubscriptionResponse{Subscription: &api.SubscriptionResponse{ID: "s", Renews: false}}, nil
+}
+func (m *mockSubSvc) ResumeSubscription(context.Context, string) (*api.MySubscriptionResponse, *models.ApiError) {
+	return &api.MySubscriptionResponse{Subscription: &api.SubscriptionResponse{ID: "s", Renews: true}}, nil
 }
 func (m *mockSubSvc) Webhook(_ context.Context, provider string, body []byte, signature string) (*api.MessageResponse, *models.ApiError) {
 	return m.webhook(provider, body, signature)
@@ -250,7 +253,11 @@ func TestWebhookHandler(t *testing.T) {
 func TestCancelSubscriptionHandler(t *testing.T) {
 	w := do(http.MethodPost, "/subscriptions/cancel", "/subscriptions/cancel", "", CancelSubscription(&mockSubSvc{}))
 	assert.Equal(t, http.StatusOK, w.Code)
-	assert.JSONEq(t, `{"message":"subscription cancelled"}`, w.Body.String())
+	assert.Contains(t, w.Body.String(), `"renews":false`)
+
+	w = do(http.MethodPost, "/subscriptions/resume", "/subscriptions/resume", "", ResumeSubscription(&mockSubSvc{}))
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Contains(t, w.Body.String(), `"renews":true`)
 }
 
 func TestPaymentHandlers(t *testing.T) {

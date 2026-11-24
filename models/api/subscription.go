@@ -23,6 +23,10 @@ type SubscriptionResponse struct {
 	Amount      float64   `json:"amount"`
 	StartsAt    time.Time `json:"starts_at"`
 	EndsAt      time.Time `json:"ends_at"`
+	// Renews is true until the student stops the subscription: a new payment is then asked when the period ends
+	// (nothing is charged automatically). StoppedAt is when they stopped it.
+	Renews    bool       `json:"renews"`
+	StoppedAt *time.Time `json:"stopped_at"`
 }
 
 // MySubscriptionResponse is the active subscription with its plan, or the Free plan view (subscription null).
@@ -30,6 +34,9 @@ type MySubscriptionResponse struct {
 	Subscription *SubscriptionResponse `json:"subscription"`
 	Plan         PlanResponse          `json:"plan"`
 	IsFree       bool                  `json:"is_free"`
+	// Lapsed is set on the Free view when the last subscription ended without its renewal being paid and the
+	// student had not stopped it: the renewal is still due.
+	Lapsed *SubscriptionResponse `json:"lapsed"`
 }
 
 // PaymentResponse is one payment of the user: its state after the return from the gateway, and its receipt.

@@ -4,7 +4,7 @@ Subscription plans with quotas, promo codes, subscriptions and payments. Provide
 
 Port `8089`, health `/health`. Plans, promo codes, quotas, `GET /subscriptions/me`, checkout, cancel and the Flouci webhook are implemented.
 
-Payments go through the `flouci` provider (`core/flouci.go`, registered in `core.NewProviderFactory`). Checkout stores a pending row in `payments` (amounts in integer millimes), calls Flouci and returns `{payment_url, payment_id}`. The webhook verifies the HMAC signature (`X-Flouci-Signature`), re-checks the payment with Flouci, then in one transaction completes the payment (replays are no-ops), creates or extends the subscription and records promo usage; `payment.completed` / `subscription.created` go through `core.Publisher`. A 0 TND checkout (100% promo) activates directly without a provider call; the Free plan itself needs no checkout (400). Cancel is immediate (the Free plan applies again). Without `FLOUCI_PUBLIC_KEY` / `FLOUCI_PRIVATE_KEY`, checkout answers `503 payment provider unavailable`.
+Payments go through the `flouci` provider (`core/flouci.go`, registered in `core.NewProviderFactory`). Checkout stores a pending row in `payments` (amounts in integer millimes), calls Flouci and returns `{payment_url, payment_id}`. The webhook verifies the HMAC signature (`X-Flouci-Signature`), re-checks the payment with Flouci, then in one transaction completes the payment (replays are no-ops), creates or extends the subscription and records promo usage; `payment.completed` / `subscription.created` go through `core.Publisher`. A 0 TND checkout (100% promo) activates directly without a provider call; the Free plan itself needs no checkout (400). A subscription renews every period unless the student stops it, but Flouci cannot charge by itself: "renews" means a new payment is asked when the period ends, and the student pays it. `POST /subscriptions/cancel` stops the renewal (`stopped_at`); access lasts until `ends_at` and no payment is asked afterwards. `POST /subscriptions/resume` undoes it, and so does paying again. `GET /subscriptions/me` gives `subscription.renews`, and on the Free view `lapsed`: the last subscription when it ended unpaid without having been stopped. Without `FLOUCI_PUBLIC_KEY` / `FLOUCI_PRIVATE_KEY`, checkout answers `503 payment provider unavailable`.
 
 Config (all optional): `FLOUCI_BASE_URL` (default `https://developers.flouci.com`), `FLOUCI_PUBLIC_KEY`, `FLOUCI_PRIVATE_KEY`, `FLOUCI_WEBHOOK_SECRET`, `FLOUCI_WEBHOOK_URL` (public URL of `/webhooks/flouci`, skipped when local), `FRONTEND_URL` (default `http://localhost:3000`).
 
@@ -31,7 +31,8 @@ A completed payment gets a receipt number (`receipt_no`, shown as `<year>-<6 dig
 | DELETE | `/admin/promo-codes/:id` | admin | DeletePromo |
 | POST | `/subscriptions/checkout` | user | Checkout (plan_id, optional promo_code; returns payment_url, payment_id) |
 | GET | `/subscriptions/me` | user | MySubscription (active plan, else Free) |
-| POST | `/subscriptions/cancel` | user | CancelSubscription (active paid subscription, 404 if none) |
+| POST | `/subscriptions/cancel` | user | CancelSubscription (stops the renewal, access until the period ends; 404 if no active paid subscription) |
+| POST | `/subscriptions/resume` | user | ResumeSubscription (renews again; 404 if none) |
 | GET | `/payments` | user | ListPayments (completed payments, newest first: the receipts) |
 | POST | `/payments/:id/verify` | user | VerifyPayment (where a payment stands; a pending one is re-checked with Flouci) |
 | POST | `/webhooks/:provider` | public | Webhook (signature verified; 404 unknown provider, 401 bad signature) |

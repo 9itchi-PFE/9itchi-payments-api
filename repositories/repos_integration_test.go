@@ -278,7 +278,10 @@ func TestSubscriptionLifecycle(t *testing.T) {
 		return &db.Subscription{UserID: user, PlanID: pro.ID, Amount: 10, StartsAt: now, EndsAt: now.Add(30 * 24 * time.Hour)}
 	}
 
-	assert.ErrorIs(t, subs.Cancel(ctx, user), ErrNotFound)
+	_, err = subs.SetRenewal(ctx, user, false)
+	assert.ErrorIs(t, err, ErrNotFound, "nothing to stop")
+	_, err = subs.LastEnded(ctx, user)
+	assert.ErrorIs(t, err, ErrNotFound)
 
 	created, err := subs.Create(ctx, newSub())
 	require.NoError(t, err)
@@ -299,10 +302,37 @@ func TestSubscriptionLifecycle(t *testing.T) {
 	_, err = subs.Create(ctx, newSub())
 	require.NoError(t, err, "expiring frees the unique slot")
 
-	require.NoError(t, subs.Cancel(ctx, user))
-	_, err = subs.GetActiveByUser(ctx, user)
+	// Stopping keeps the subscription active until it ends; stopping twice keeps the first date.
+	stopped, err := subs.SetRenewal(ctx, user, false)
+	require.NoError(t, err)
+	require.NotNil(t, stopped.StoppedAt)
+	again, err := subs.SetRenewal(ctx, user, false)
+	require.NoError(t, err)
+	assert.Equal(t, stopped.StoppedAt.UnixMicro(), again.StoppedAt.UnixMicro())
+	got, err = subs.GetActiveByUser(ctx, user)
+	require.NoError(t, err, "still active")
+	assert.NotNil(t, got.StoppedAt)
+
+	resumed, err := subs.SetRenewal(ctx, user, true)
+	require.NoError(t, err)
+	assert.Nil(t, resumed.StoppedAt)
+
+	// Paying again resumes a stopped renewal.
+	_, err = subs.SetRenewal(ctx, user, false)
+	require.NoError(t, err)
+	require.NoError(t, subs.Extend(ctx, got.ID, got.EndsAt.Add(24*time.Hour)))
+	got, err = subs.GetActiveByUser(ctx, user)
+	require.NoError(t, err)
+	assert.Nil(t, got.StoppedAt)
+
+	// Once the period is over the subscription is the last ended one, and nothing is left to stop.
+	_, err = store.Conn(ctx).Exec(ctx, `UPDATE subscriptions SET starts_at = now() - interval '40 days', ends_at = now() - interval '1 day' WHERE id = $1`, got.ID)
+	require.NoError(t, err)
+	last, err := subs.LastEnded(ctx, user)
+	require.NoError(t, err)
+	assert.Equal(t, got.ID, last.ID)
+	_, err = subs.SetRenewal(ctx, user, false)
 	assert.ErrorIs(t, err, ErrNotFound)
-	assert.ErrorIs(t, subs.Cancel(ctx, user), ErrNotFound, "nothing left to cancel")
 }
 
 func TestPaymentRepository(t *testing.T) {
