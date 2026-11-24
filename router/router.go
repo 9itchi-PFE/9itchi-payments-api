@@ -62,6 +62,7 @@ func initializeRoutes(r *gin.Engine, services *services.Services) {
 	internalGroup.Use(InternalAPIKeyMiddleware())
 	{
 		internalGroup.GET("/internal/quotas/:userId", handlers.GetQuotas(services.Plan))
+		internalGroup.POST("/internal/subscriptions/renewal-reminders", handlers.SendRenewalReminders(services.Subscription))
 	}
 
 	// Fallback

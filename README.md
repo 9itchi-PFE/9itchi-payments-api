@@ -28,6 +28,7 @@ The legal information printed on receipts (`legal_name`, `address`, `tax_id`, `v
 | PUT | `/admin/plans/:id` | admin | UpdatePlan |
 | DELETE | `/admin/plans/:id` | admin | DeactivatePlan (soft, active=false) |
 | GET | `/internal/quotas/:userId` | internal | GetQuotas (active plan, else Free) |
+| POST | `/internal/subscriptions/renewal-reminders` | internal | SendRenewalReminders (raises `subscription.renewal_due`, once per period; returns `due`, `lapsed`, `failed`) |
 | POST | `/promo-codes/validate` | user | ValidatePromo (returns valid, discount_amount, final_price, reason) |
 | GET | `/admin/promo-codes` | admin | ListPromos |
 | POST | `/admin/promo-codes` | admin | CreatePromo |
@@ -42,6 +43,15 @@ The legal information printed on receipts (`legal_name`, `address`, `tax_id`, `v
 | GET | `/receipt-issuer` | user | GetReceiptIssuer (legal information for receipts; empty fields are not known yet) |
 | PUT | `/admin/receipt-issuer` | admin | UpdateReceiptIssuer (full replacement) |
 | POST | `/webhooks/:provider` | public | Webhook (signature verified; 404 unknown provider, 401 bad signature) |
+
+## Renewal reminders
+
+Nothing is charged automatically, so the student is reminded. `POST /internal/subscriptions/renewal-reminders` (called by schedule-api) raises `subscription.renewal_due` for the renewing subscriptions of a paid plan:
+
+- `stage: "due"`: the period ends within 7 days (the same 7 days as the banner of the app);
+- `stage: "lapsed"`: the period ended within the last 7 days, was not renewed, and the user has no running subscription.
+
+The payload carries `user_id`, `subscription_id`, `plan_id`, `plan_name`, `price_millimes`, `ends_at` and `stage`. A subscription is reminded once per stage and per period (`due_reminded_for`, `lapse_reminded_for` keep the end of the period that was reminded); a renewal moves the end, so the next period gets its own reminders. A subscription the student stopped is never reminded. The call can be repeated and run by several instances at once: each subscription is claimed by one. When the event cannot be published the claim is given back and the next call tries again. Without `RABBITMQ_URL` the event is only logged and the subscription still counts as reminded.
 
 ## Events (RabbitMQ)
 

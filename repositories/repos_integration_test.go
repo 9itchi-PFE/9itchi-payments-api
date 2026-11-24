@@ -4,6 +4,7 @@ package repositories
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -485,4 +486,102 @@ func TestIssuerRepository(t *testing.T) {
 	assert.Equal(t, 1, rows, "the table holds one row")
 	_, err = store.Conn(ctx).Exec(ctx, `INSERT INTO receipt_issuer (id) VALUES (false)`)
 	assert.Error(t, err, "a second row is refused")
+}
+
+func TestRenewalReminders(t *testing.T) {
+	store := newTestStore(t)
+	plans := NewPlanRepository(store)
+	repo := NewSubscriptionRepository(store)
+	ctx := context.Background()
+	week := 7 * 24 * time.Hour
+
+	paid, err := plans.Create(ctx, &db.Plan{Name: "Mensuel", Price: 35, DurationDays: 30, Quotas: map[string]int{}, Active: true})
+	require.NoError(t, err)
+	free, err := plans.GetByName(ctx, "Free")
+	require.NoError(t, err)
+
+	// add inserts a subscription ending in `in` (negative: already ended) and returns its id.
+	n := 0
+	add := func(planID string, in time.Duration, status string, stopped bool) string {
+		n++
+		user := fmt.Sprintf("00000000-0000-0000-0000-%012d", n)
+		var id string
+		require.NoError(t, store.Conn(ctx).QueryRow(ctx, `
+			INSERT INTO subscriptions (user_id, plan_id, status, amount, starts_at, ends_at, stopped_at)
+			VALUES ($1, $2, $3, 35, now() - interval '30 days', now() + make_interval(secs => $4), CASE WHEN $5 THEN now() END) RETURNING id`,
+			user, planID, status, in.Seconds(), stopped).Scan(&id))
+		return id
+	}
+	ids := func(rs []db.RenewalReminder) []string {
+		out := make([]string, 0, len(rs))
+		for _, r := range rs {
+			out = append(out, r.SubscriptionID)
+		}
+		return out
+	}
+
+	soon := add(paid.ID, 3*24*time.Hour, "active", false)
+	add(paid.ID, 20*24*time.Hour, "active", false) // too early
+	add(paid.ID, 3*24*time.Hour, "active", true)   // the student stopped it: nothing to renew
+	add(free.ID, 3*24*time.Hour, "active", false)  // a free plan has nothing to pay
+	lapsed := add(paid.ID, -2*24*time.Hour, "active", false)
+	add(paid.ID, -20*24*time.Hour, "active", false) // lapsed too long ago
+	add(paid.ID, -2*24*time.Hour, "active", true)   // stopped, then ended: as the student wanted
+	add(paid.ID, -2*24*time.Hour, "cancelled", false)
+
+	due, err := repo.ClaimReminders(ctx, db.ReminderDue, week, 10)
+	require.NoError(t, err)
+	assert.Equal(t, []string{soon}, ids(due))
+	assert.Equal(t, "Mensuel", due[0].PlanName)
+	assert.InDelta(t, 35, due[0].PlanPrice, 0.001)
+
+	again, err := repo.ClaimReminders(ctx, db.ReminderDue, week, 10)
+	require.NoError(t, err)
+	assert.Empty(t, again, "one reminder per period")
+
+	// A reminder that could not be raised is given back and claimed again.
+	require.NoError(t, repo.ReleaseReminder(ctx, soon, db.ReminderDue))
+	retry, err := repo.ClaimReminders(ctx, db.ReminderDue, week, 10)
+	require.NoError(t, err)
+	assert.Equal(t, []string{soon}, ids(retry))
+
+	// Renewing moves the end of the period: when that new period nears its end, it gets its own reminder.
+	require.NoError(t, repo.Extend(ctx, soon, time.Now().Add(33*24*time.Hour)))
+	none, err := repo.ClaimReminders(ctx, db.ReminderDue, week, 10)
+	require.NoError(t, err)
+	assert.Empty(t, none)
+	require.NoError(t, repo.Extend(ctx, soon, time.Now().Add(2*24*time.Hour)))
+	next, err := repo.ClaimReminders(ctx, db.ReminderDue, week, 10)
+	require.NoError(t, err)
+	assert.Equal(t, []string{soon}, ids(next))
+
+	gone, err := repo.ClaimReminders(ctx, db.ReminderLapsed, week, 10)
+	require.NoError(t, err)
+	assert.Equal(t, []string{lapsed}, ids(gone))
+	gone, err = repo.ClaimReminders(ctx, db.ReminderLapsed, week, 10)
+	require.NoError(t, err)
+	assert.Empty(t, gone)
+
+	// Someone who paid again after a lapse has a running subscription: the old one is not chased.
+	var user string
+	back := add(paid.ID, -1*24*time.Hour, "expired", false)
+	require.NoError(t, store.Conn(ctx).QueryRow(ctx, `SELECT user_id FROM subscriptions WHERE id = $1`, back).Scan(&user))
+	_, err = store.Conn(ctx).Exec(ctx, `INSERT INTO subscriptions (user_id, plan_id, status, amount, starts_at, ends_at) VALUES ($1, $2, 'active', 35, now(), now() + interval '30 days')`, user, paid.ID)
+	require.NoError(t, err)
+	gone, err = repo.ClaimReminders(ctx, db.ReminderLapsed, week, 10)
+	require.NoError(t, err)
+	assert.Empty(t, gone)
+
+	_, err = repo.ClaimReminders(ctx, "later", week, 10)
+	assert.Error(t, err)
+	assert.Error(t, repo.ReleaseReminder(ctx, soon, "later"))
+
+	// The limit bounds one call; the rest is taken at the next.
+	a, b := add(paid.ID, 24*time.Hour, "active", false), add(paid.ID, 36*time.Hour, "active", false)
+	one, err := repo.ClaimReminders(ctx, db.ReminderDue, week, 1)
+	require.NoError(t, err)
+	assert.Equal(t, []string{a}, ids(one), "the period that ends first")
+	two, err := repo.ClaimReminders(ctx, db.ReminderDue, week, 1)
+	require.NoError(t, err)
+	assert.Equal(t, []string{b}, ids(two))
 }

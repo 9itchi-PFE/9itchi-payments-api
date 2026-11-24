@@ -44,6 +44,9 @@ type SubscriptionService interface {
 	VerifyPayment(ctx context.Context, userID, id string) (*api.PaymentResponse, *models.ApiError)
 	// POST /webhooks/:provider: payment provider callback (signature verified, payment re-checked with the provider)
 	Webhook(ctx context.Context, provider string, payload []byte, signature string) (*api.MessageResponse, *models.ApiError)
+	// POST /internal/subscriptions/renewal-reminders: raise subscription.renewal_due for the renewing subscriptions
+	// that end soon or just lapsed, once per period (called by schedule-api)
+	SendRenewalReminders(ctx context.Context) (*api.RenewalRemindersResponse, *models.ApiError)
 }
 
 type subscriptionService struct {
@@ -431,4 +434,44 @@ func (s *subscriptionService) Webhook(ctx context.Context, provider string, payl
 		s.publish(ctx, pay, subCreated)
 	}
 	return ack, nil
+}
+
+const (
+	// renewalReminderWindow is how long before the end of a period the student is reminded: the same 7 days as the
+	// banner of the app. lapseReminderWindow is how long after a lapse the reminder is still worth sending.
+	renewalReminderWindow = 7 * 24 * time.Hour
+	lapseReminderWindow   = 7 * 24 * time.Hour
+	// reminderBatch bounds one call; the rest is taken at the next one.
+	reminderBatch = 200
+)
+
+func (s *subscriptionService) SendRenewalReminders(ctx context.Context) (*api.RenewalRemindersResponse, *models.ApiError) {
+	res := &api.RenewalRemindersResponse{}
+	for _, stage := range []struct {
+		name   string
+		window time.Duration
+		count  *int
+	}{{db.ReminderDue, renewalReminderWindow, &res.Due}, {db.ReminderLapsed, lapseReminderWindow, &res.Lapsed}} {
+		claimed, err := s.repo.ClaimReminders(ctx, stage.name, stage.window, reminderBatch)
+		if err != nil {
+			return nil, repoError(err, "subscription not found")
+		}
+		for _, r := range claimed {
+			payload := map[string]any{
+				"user_id": r.UserID, "subscription_id": r.SubscriptionID, "plan_id": r.PlanID, "plan_name": r.PlanName,
+				"price_millimes": millimes(r.PlanPrice), "ends_at": r.EndsAt.UTC().Format(time.RFC3339), "stage": stage.name,
+			}
+			if err := s.events.Publish(ctx, core.EventSubscriptionRenewalDue, payload); err != nil {
+				// Not raised: the claim is given back so that the next call tries again.
+				utils.Logger.Logger.Warnw("publish event", "event", core.EventSubscriptionRenewalDue, "subscription_id", r.SubscriptionID, "error", err)
+				if rerr := s.repo.ReleaseReminder(ctx, r.SubscriptionID, stage.name); rerr != nil {
+					utils.Logger.Logger.Errorw("release renewal reminder", "subscription_id", r.SubscriptionID, "error", rerr)
+				}
+				res.Failed++
+				continue
+			}
+			*stage.count++
+		}
+	}
+	return res, nil
 }

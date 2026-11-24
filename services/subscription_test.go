@@ -666,3 +666,74 @@ func TestPaymentCompletedEventCarriesTheReceipt(t *testing.T) {
 		assert.NotContains(t, payload, "receipt_no")
 	})
 }
+
+func TestSendRenewalReminders(t *testing.T) {
+	ends := time.Date(2026, 12, 24, 9, 0, 0, 0, time.UTC)
+	claim := func(_ context.Context, stage string, window time.Duration, limit int) ([]db.RenewalReminder, error) {
+		assert.Equal(t, 7*24*time.Hour, window, "the same 7 days as the banner of the app")
+		assert.Equal(t, reminderBatch, limit)
+		switch stage {
+		case db.ReminderDue:
+			return []db.RenewalReminder{
+				{SubscriptionID: "s1", UserID: userID, PlanID: planA, PlanName: "Mensuel", PlanPrice: 35, EndsAt: ends},
+				{SubscriptionID: "s2", UserID: "u2", PlanID: planA, PlanName: "Mensuel", PlanPrice: 35, EndsAt: ends},
+			}, nil
+		case db.ReminderLapsed:
+			return []db.RenewalReminder{{SubscriptionID: "s3", UserID: "u3", PlanID: planA, PlanName: "Mensuel", PlanPrice: 35, EndsAt: ends.AddDate(0, -1, 0)}}, nil
+		}
+		t.Fatalf("unexpected stage %q", stage)
+		return nil, nil
+	}
+
+	t.Run("one event per subscription, saying what the reminder needs", func(t *testing.T) {
+		svc := newSubSvc(&mocks.SubscriptionRepository{ClaimRemindersFn: claim}, nil, nil, nil, nil)
+		res, apiErr := svc.SendRenewalReminders(context.Background())
+		require.Nil(t, apiErr)
+		assert.Equal(t, &api.RenewalRemindersResponse{Due: 2, Lapsed: 1}, res)
+
+		pub := svc.events.(*mocks.Publisher)
+		assert.Equal(t, []string{core.EventSubscriptionRenewalDue, core.EventSubscriptionRenewalDue, core.EventSubscriptionRenewalDue}, pub.Events)
+		first := pub.Payloads[0].(map[string]any)
+		assert.Equal(t, map[string]any{
+			"user_id": userID, "subscription_id": "s1", "plan_id": planA, "plan_name": "Mensuel",
+			"price_millimes": int64(35000), "ends_at": "2026-12-24T09:00:00Z", "stage": "due",
+		}, first)
+		assert.Equal(t, "lapsed", pub.Payloads[2].(map[string]any)["stage"])
+	})
+
+	t.Run("a reminder that could not be raised is given back", func(t *testing.T) {
+		var released []string
+		repo := &mocks.SubscriptionRepository{ClaimRemindersFn: claim, ReleaseReminderFn: func(_ context.Context, id, stage string) error {
+			released = append(released, id+":"+stage)
+			return nil
+		}}
+		svc := newSubSvc(repo, nil, nil, nil, nil)
+		svc.events.(*mocks.Publisher).Fail = func(_ string, payload any) error {
+			if payload.(map[string]any)["subscription_id"] == "s2" {
+				return errors.New("rabbitmq: broker unreachable")
+			}
+			return nil
+		}
+		res, apiErr := svc.SendRenewalReminders(context.Background())
+		require.Nil(t, apiErr)
+		assert.Equal(t, &api.RenewalRemindersResponse{Due: 1, Lapsed: 1, Failed: 1}, res)
+		assert.Equal(t, []string{"s2:due"}, released)
+	})
+
+	t.Run("nothing to remind", func(t *testing.T) {
+		svc := newSubSvc(&mocks.SubscriptionRepository{}, nil, nil, nil, nil)
+		res, apiErr := svc.SendRenewalReminders(context.Background())
+		require.Nil(t, apiErr)
+		assert.Equal(t, &api.RenewalRemindersResponse{}, res)
+		assert.Empty(t, eventsOf(svc))
+	})
+
+	t.Run("database down", func(t *testing.T) {
+		repo := &mocks.SubscriptionRepository{ClaimRemindersFn: func(context.Context, string, time.Duration, int) ([]db.RenewalReminder, error) {
+			return nil, errors.New("database down")
+		}}
+		_, apiErr := newSubSvc(repo, nil, nil, nil, nil).SendRenewalReminders(context.Background())
+		require.NotNil(t, apiErr)
+		assert.Equal(t, http.StatusInternalServerError, apiErr.Code)
+	})
+}

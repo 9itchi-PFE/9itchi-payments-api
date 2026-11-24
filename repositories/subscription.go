@@ -2,6 +2,7 @@ package repositories
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"9itchi-payments-api/models/db"
@@ -26,6 +27,13 @@ type SubscriptionRepository interface {
 	SetRenewal(ctx context.Context, userID string, renews bool) (*db.Subscription, error)
 	// LastEnded returns the user's most recent subscription whose period is over (ErrNotFound if none).
 	LastEnded(ctx context.Context, userID string) (*db.Subscription, error)
+	// ClaimReminders marks and returns, at most limit at a time, the renewing subscriptions of a paid plan that need
+	// the reminder of a stage and did not get it for their current period. ReminderDue: the period ends within
+	// window. ReminderLapsed: it ended within window and the user has no running subscription. A subscription is
+	// claimed once per period, even when several instances ask at the same time.
+	ClaimReminders(ctx context.Context, stage string, window time.Duration, limit int) ([]db.RenewalReminder, error)
+	// ReleaseReminder undoes a claim whose reminder could not be raised, so that it is tried again.
+	ReleaseReminder(ctx context.Context, subscriptionID, stage string) error
 }
 
 type subscriptionRepository struct {
@@ -110,4 +118,60 @@ func (r *subscriptionRepository) LastEnded(ctx context.Context, userID string) (
 	}
 	s, err := pgx.CollectOneRow(rows, pgx.RowToAddrOfStructByName[db.Subscription])
 	return s, MapError(err)
+}
+
+// reminderQueries claim the subscriptions of one stage. The inner SELECT locks the rows it takes, so two instances
+// never claim the same subscription.
+var reminderQueries = map[string]string{
+	db.ReminderDue: `
+		UPDATE subscriptions s SET due_reminded_for = s.ends_at
+		FROM plans p
+		WHERE p.id = s.plan_id AND p.price > 0 AND s.id IN (
+			SELECT id FROM subscriptions
+			WHERE status = 'active' AND stopped_at IS NULL
+			  AND ends_at > now() AND ends_at <= now() + make_interval(secs => $1)
+			  AND due_reminded_for IS DISTINCT FROM ends_at
+			ORDER BY ends_at LIMIT $2 FOR UPDATE SKIP LOCKED)
+		RETURNING s.id, s.user_id, s.plan_id, p.name, p.price, s.ends_at`,
+	db.ReminderLapsed: `
+		UPDATE subscriptions s SET lapse_reminded_for = s.ends_at
+		FROM plans p
+		WHERE p.id = s.plan_id AND p.price > 0 AND s.id IN (
+			SELECT l.id FROM subscriptions l
+			WHERE l.status IN ('active', 'expired') AND l.stopped_at IS NULL
+			  AND l.ends_at <= now() AND l.ends_at > now() - make_interval(secs => $1)
+			  AND l.lapse_reminded_for IS DISTINCT FROM l.ends_at
+			  AND NOT EXISTS (SELECT 1 FROM subscriptions a WHERE a.user_id = l.user_id AND a.status = 'active' AND a.ends_at > now())
+			ORDER BY l.ends_at LIMIT $2 FOR UPDATE SKIP LOCKED)
+		RETURNING s.id, s.user_id, s.plan_id, p.name, p.price, s.ends_at`,
+}
+
+func (r *subscriptionRepository) ClaimReminders(ctx context.Context, stage string, window time.Duration, limit int) ([]db.RenewalReminder, error) {
+	query, ok := reminderQueries[stage]
+	if !ok {
+		return nil, fmt.Errorf("unknown reminder stage %q", stage)
+	}
+	ctx, cancel := QueryTimeout(ctx)
+	defer cancel()
+	rows, err := r.store.Conn(ctx).Query(ctx, query, window.Seconds(), limit)
+	if err != nil {
+		return nil, MapError(err)
+	}
+	out, err := pgx.CollectRows(rows, pgx.RowToStructByName[db.RenewalReminder])
+	return out, MapError(err)
+}
+
+func (r *subscriptionRepository) ReleaseReminder(ctx context.Context, subscriptionID, stage string) error {
+	column := "due_reminded_for"
+	switch stage {
+	case db.ReminderDue:
+	case db.ReminderLapsed:
+		column = "lapse_reminded_for"
+	default:
+		return fmt.Errorf("unknown reminder stage %q", stage)
+	}
+	ctx, cancel := QueryTimeout(ctx)
+	defer cancel()
+	_, err := r.store.Conn(ctx).Exec(ctx, `UPDATE subscriptions SET `+column+` = NULL WHERE id = $1`, subscriptionID)
+	return MapError(err)
 }
