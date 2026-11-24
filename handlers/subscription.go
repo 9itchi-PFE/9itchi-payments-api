@@ -1,6 +1,8 @@
 package handlers
 
 import (
+	"errors"
+	"io"
 	"net/http"
 
 	"9itchi-payments-api/models"
@@ -39,7 +41,7 @@ func MySubscription(svc services.SubscriptionService) gin.HandlerFunc {
 	}
 }
 
-// CancelSubscription: POST /subscriptions/cancel (user) cancel at period end.
+// CancelSubscription: POST /subscriptions/cancel (user) cancel the active paid subscription.
 func CancelSubscription(svc services.SubscriptionService) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		result, apiErr := svc.CancelSubscription(c.Request.Context(), c.GetString("user_id"))
@@ -51,10 +53,22 @@ func CancelSubscription(svc services.SubscriptionService) gin.HandlerFunc {
 	}
 }
 
+// maxWebhookBody caps the raw webhook body read into memory.
+const maxWebhookBody = 1 << 20
+
 // Webhook: POST /webhooks/:provider (public) payment provider callback (signature verified).
 func Webhook(svc services.SubscriptionService) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		result, apiErr := svc.Webhook(c.Request.Context(), c.Param("provider"))
+		body, err := io.ReadAll(http.MaxBytesReader(c.Writer, c.Request.Body, maxWebhookBody))
+		if err != nil {
+			models.FormatError(c, &models.ApiError{Code: http.StatusBadRequest, Error: errors.New("invalid webhook")})
+			return
+		}
+		signature := c.GetHeader("X-Flouci-Signature")
+		if signature == "" {
+			signature = c.GetHeader("Flouci-Signature")
+		}
+		result, apiErr := svc.Webhook(c.Request.Context(), c.Param("provider"), body, signature)
 		if apiErr != nil {
 			models.FormatError(c, apiErr)
 			return

@@ -62,20 +62,22 @@ func (m *mockPromoSvc) DeletePromo(context.Context, string, string) (*api.Messag
 }
 
 type mockSubSvc struct {
-	me func(string) (*api.MySubscriptionResponse, *models.ApiError)
+	me       func(string) (*api.MySubscriptionResponse, *models.ApiError)
+	checkout func(api.CheckoutRequest) (*api.CheckoutResponse, *models.ApiError)
+	webhook  func(provider string, body []byte, signature string) (*api.MessageResponse, *models.ApiError)
 }
 
-func (m *mockSubSvc) Checkout(context.Context, string, api.CheckoutRequest) (any, *models.ApiError) {
-	return nil, models.NotImplemented()
+func (m *mockSubSvc) Checkout(_ context.Context, _ string, r api.CheckoutRequest) (*api.CheckoutResponse, *models.ApiError) {
+	return m.checkout(r)
 }
 func (m *mockSubSvc) MySubscription(_ context.Context, uid string) (*api.MySubscriptionResponse, *models.ApiError) {
 	return m.me(uid)
 }
-func (m *mockSubSvc) CancelSubscription(context.Context, string) (any, *models.ApiError) {
-	return nil, models.NotImplemented()
+func (m *mockSubSvc) CancelSubscription(context.Context, string) (*api.MessageResponse, *models.ApiError) {
+	return &api.MessageResponse{Message: "subscription cancelled"}, nil
 }
-func (m *mockSubSvc) Webhook(context.Context, string) (any, *models.ApiError) {
-	return nil, models.NotImplemented()
+func (m *mockSubSvc) Webhook(_ context.Context, provider string, body []byte, signature string) (*api.MessageResponse, *models.ApiError) {
+	return m.webhook(provider, body, signature)
 }
 
 // do runs one handler on a gin engine so path params and JSON binding behave as in production.
@@ -191,7 +193,53 @@ func TestMySubscriptionHandler(t *testing.T) {
 	assert.Contains(t, w.Body.String(), `"subscription":null`)
 }
 
-func TestCheckoutHandlerStays501(t *testing.T) {
-	w := do(http.MethodPost, "/subscriptions/checkout", "/subscriptions/checkout", `{}`, Checkout(&mockSubSvc{}))
-	assert.Equal(t, http.StatusNotImplemented, w.Code)
+func TestCheckoutHandler(t *testing.T) {
+	svc := &mockSubSvc{checkout: func(r api.CheckoutRequest) (*api.CheckoutResponse, *models.ApiError) {
+		return &api.CheckoutResponse{PaymentURL: "https://pay.example/x", PaymentID: "pay-1"}, nil
+	}}
+	body := `{"plan_id":"11111111-1111-1111-1111-111111111111","promo_code":"SAVE"}`
+	w := do(http.MethodPost, "/subscriptions/checkout", "/subscriptions/checkout", body, Checkout(svc))
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.JSONEq(t, `{"payment_url":"https://pay.example/x","payment_id":"pay-1"}`, w.Body.String())
+
+	for _, bad := range []string{`{}`, `{"plan_id":"nope"}`, `{`} {
+		w = do(http.MethodPost, "/subscriptions/checkout", "/subscriptions/checkout", bad, Checkout(svc))
+		assert.Equal(t, http.StatusBadRequest, w.Code, bad)
+	}
+}
+
+func TestWebhookHandler(t *testing.T) {
+	var gotProvider, gotBody, gotSig string
+	svc := &mockSubSvc{webhook: func(provider string, body []byte, sig string) (*api.MessageResponse, *models.ApiError) {
+		gotProvider, gotBody, gotSig = provider, string(body), sig
+		if sig != "good" {
+			return nil, &models.ApiError{Code: http.StatusUnauthorized, Error: errors.New("invalid signature")}
+		}
+		return &api.MessageResponse{Message: "ok"}, nil
+	}}
+	run := func(sig string) *httptest.ResponseRecorder {
+		gin.SetMode(gin.TestMode)
+		r := gin.New()
+		r.POST("/webhooks/:provider", Webhook(svc))
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/webhooks/flouci", strings.NewReader(`{"payment_id":"r1"}`))
+		req.Header.Set("X-Flouci-Signature", sig)
+		r.ServeHTTP(w, req)
+		return w
+	}
+	w := run("good")
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, "flouci", gotProvider)
+	assert.Equal(t, `{"payment_id":"r1"}`, gotBody, "raw body is passed untouched for signature checks")
+	assert.Equal(t, "good", gotSig)
+
+	w = run("forged")
+	assert.Equal(t, http.StatusUnauthorized, w.Code)
+	assert.Contains(t, w.Body.String(), `"error":"invalid signature"`)
+}
+
+func TestCancelSubscriptionHandler(t *testing.T) {
+	w := do(http.MethodPost, "/subscriptions/cancel", "/subscriptions/cancel", "", CancelSubscription(&mockSubSvc{}))
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.JSONEq(t, `{"message":"subscription cancelled"}`, w.Body.String())
 }

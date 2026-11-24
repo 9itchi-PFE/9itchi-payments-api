@@ -263,3 +263,99 @@ func TestSubscriptionActiveIgnoresLapsed(t *testing.T) {
 	_, err = subs.GetActiveByUser(ctx, user)
 	assert.ErrorIs(t, err, ErrNotFound, "status active but ends_at in the past")
 }
+
+func TestSubscriptionLifecycle(t *testing.T) {
+	store := newTestStore(t)
+	plans := NewPlanRepository(store)
+	subs := NewSubscriptionRepository(store)
+	ctx := context.Background()
+	const user = "77777777-7777-7777-7777-777777777777"
+
+	pro, err := plans.Create(ctx, &db.Plan{Name: "Pro", Price: 10, DurationDays: 30, Quotas: map[string]int{}, Active: true})
+	require.NoError(t, err)
+	now := time.Now()
+	newSub := func() *db.Subscription {
+		return &db.Subscription{UserID: user, PlanID: pro.ID, Amount: 10, StartsAt: now, EndsAt: now.Add(30 * 24 * time.Hour)}
+	}
+
+	assert.ErrorIs(t, subs.Cancel(ctx, user), ErrNotFound)
+
+	created, err := subs.Create(ctx, newSub())
+	require.NoError(t, err)
+	assert.Equal(t, "active", created.Status)
+	_, err = subs.Create(ctx, newSub())
+	assert.ErrorIs(t, err, ErrConflict, "one active subscription per user")
+
+	newEnd := created.EndsAt.Add(30 * 24 * time.Hour)
+	require.NoError(t, subs.Extend(ctx, created.ID, newEnd))
+	got, err := subs.GetActiveByUser(ctx, user)
+	require.NoError(t, err)
+	assert.WithinDuration(t, newEnd, got.EndsAt, time.Second)
+	assert.ErrorIs(t, subs.Extend(ctx, "00000000-0000-0000-0000-000000000000", newEnd), ErrNotFound)
+
+	require.NoError(t, subs.ExpireActive(ctx, user))
+	_, err = subs.GetActiveByUser(ctx, user)
+	assert.ErrorIs(t, err, ErrNotFound)
+	_, err = subs.Create(ctx, newSub())
+	require.NoError(t, err, "expiring frees the unique slot")
+
+	require.NoError(t, subs.Cancel(ctx, user))
+	_, err = subs.GetActiveByUser(ctx, user)
+	assert.ErrorIs(t, err, ErrNotFound)
+	assert.ErrorIs(t, subs.Cancel(ctx, user), ErrNotFound, "nothing left to cancel")
+}
+
+func TestPaymentRepository(t *testing.T) {
+	store := newTestStore(t)
+	plans := NewPlanRepository(store)
+	repo := NewPaymentRepository(store)
+	ctx := context.Background()
+	const user = "88888888-8888-8888-8888-888888888888"
+
+	free, err := plans.GetByName(ctx, "Free")
+	require.NoError(t, err)
+	newPayment := func() *db.Payment {
+		return &db.Payment{UserID: user, PlanID: free.ID, Provider: "flouci", AmountMillimes: 40000, DiscountMillimes: 10000}
+	}
+
+	p, err := repo.Create(ctx, newPayment())
+	require.NoError(t, err)
+	assert.Equal(t, "pending", p.Status)
+	assert.Nil(t, p.ProviderRef)
+	assert.EqualValues(t, 40000, p.AmountMillimes)
+
+	bad := newPayment()
+	bad.AmountMillimes = -1
+	_, err = repo.Create(ctx, bad)
+	assert.Error(t, err, "CHECK amount_millimes >= 0")
+
+	_, err = repo.GetByProviderRef(ctx, "flouci", "ref-1")
+	assert.ErrorIs(t, err, ErrNotFound)
+	require.NoError(t, repo.SetProviderRef(ctx, p.ID, "ref-1"))
+	got, err := repo.GetByProviderRef(ctx, "flouci", "ref-1")
+	require.NoError(t, err)
+	assert.Equal(t, p.ID, got.ID)
+	_, err = repo.GetByProviderRef(ctx, "other", "ref-1")
+	assert.ErrorIs(t, err, ErrNotFound, "reference is scoped to its provider")
+
+	other, err := repo.Create(ctx, newPayment())
+	require.NoError(t, err)
+	assert.ErrorIs(t, repo.SetProviderRef(ctx, other.ID, "ref-1"), ErrConflict, "unique provider reference")
+
+	applied, err := repo.MarkCompleted(ctx, p.ID)
+	require.NoError(t, err)
+	assert.True(t, applied)
+	applied, err = repo.MarkCompleted(ctx, p.ID)
+	require.NoError(t, err)
+	assert.False(t, applied, "replay is a no-op")
+	got, err = repo.GetByProviderRef(ctx, "flouci", "ref-1")
+	require.NoError(t, err)
+	assert.Equal(t, "completed", got.Status)
+	assert.NotNil(t, got.CompletedAt)
+
+	require.NoError(t, repo.MarkFailed(ctx, other.ID))
+	require.NoError(t, repo.MarkFailed(ctx, p.ID), "completed payments are never failed")
+	got, err = repo.GetByProviderRef(ctx, "flouci", "ref-1")
+	require.NoError(t, err)
+	assert.Equal(t, "completed", got.Status)
+}

@@ -13,7 +13,7 @@ import (
 func TestMigrationsCreateTables(t *testing.T) {
 	store := newTestStore(t)
 	ctx := context.Background()
-	for _, table := range []string{"plans", "promo_codes", "subscriptions"} {
+	for _, table := range []string{"plans", "promo_codes", "subscriptions", "payments"} {
 		var n int
 		require.NoError(t, store.Conn(ctx).QueryRow(ctx, "SELECT count(*) FROM "+table).Scan(&n), table)
 		if table == "plans" {

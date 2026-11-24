@@ -22,6 +22,13 @@ type AppConfig struct {
 	RabbitMQURL            string
 	// Peer service base URLs.
 	AccountAPIURL string
+	// Flouci gateway (all optional; checkout answers 503 while the keys are empty). Never log the keys or secret.
+	FlouciBaseURL       string
+	FlouciPublicKey     string
+	FlouciPrivateKey    string
+	FlouciWebhookSecret string
+	FlouciWebhookURL    string
+	FrontendURL         string
 }
 
 // LoadConfig loads configuration from environment variables.
@@ -37,6 +44,12 @@ func LoadConfig() AppConfig {
 		InternalAPIKeyRequired: getBoolWithDefault("INTERNAL_API_KEY_REQUIRED", true),
 		RabbitMQURL:            getStringWithDefault("RABBITMQ_URL", "amqp://guest:guest@localhost:5672/"),
 		AccountAPIURL:          getStringWithDefault("ACCOUNT_API_URL", "http://9itchi-account-api:8081"),
+		FlouciBaseURL:          getStringWithDefault("FLOUCI_BASE_URL", "https://developers.flouci.com"),
+		FlouciPublicKey:        getStringWithDefault("FLOUCI_PUBLIC_KEY", ""),
+		FlouciPrivateKey:       getStringWithDefault("FLOUCI_PRIVATE_KEY", ""),
+		FlouciWebhookSecret:    getStringWithDefault("FLOUCI_WEBHOOK_SECRET", ""),
+		FlouciWebhookURL:       getStringWithDefault("FLOUCI_WEBHOOK_URL", ""),
+		FrontendURL:            getStringWithDefault("FRONTEND_URL", "http://localhost:3000"),
 	}
 }
 

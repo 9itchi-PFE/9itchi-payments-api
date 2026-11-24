@@ -2,8 +2,17 @@ package api
 
 import "time"
 
-// CheckoutRequest is the validated body of Checkout. Add binding tags as fields are defined.
-type CheckoutRequest struct{}
+// CheckoutRequest is the validated body of Checkout. PromoCode is optional.
+type CheckoutRequest struct {
+	PlanID    string `json:"plan_id" binding:"required,uuid"`
+	PromoCode string `json:"promo_code" binding:"max=64"`
+}
+
+// CheckoutResponse tells the client where to pay. PaymentURL is empty when nothing is due (activated directly).
+type CheckoutResponse struct {
+	PaymentURL string `json:"payment_url"`
+	PaymentID  string `json:"payment_id"`
+}
 
 // SubscriptionResponse is a subscription row as returned to its owner.
 type SubscriptionResponse struct {
