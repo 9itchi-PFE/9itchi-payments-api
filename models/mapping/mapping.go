@@ -1,6 +1,8 @@
 package mapping
 
 import (
+	"time"
+
 	"9itchi-payments-api/models/api"
 	"9itchi-payments-api/models/db"
 )
@@ -10,8 +12,12 @@ func PlanToResponse(p *db.Plan) api.PlanResponse {
 	if quotas == nil {
 		quotas = map[string]int{}
 	}
+	ends := ""
+	if p.LaunchEndsOn != nil {
+		ends = p.LaunchEndsOn.Format(time.DateOnly)
+	}
 	return api.PlanResponse{
-		ID: p.ID, Name: p.Name, Price: p.Price, RegularPrice: p.RegularPrice, DurationDays: p.DurationDays,
+		ID: p.ID, Name: p.Name, Price: p.Price, RegularPrice: p.RegularPrice, LaunchEndsOn: ends, DurationDays: p.DurationDays,
 		Quotas: quotas, Active: p.Active, CreatedAt: p.CreatedAt, UpdatedAt: p.UpdatedAt,
 	}
 }

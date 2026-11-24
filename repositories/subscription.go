@@ -120,6 +120,14 @@ func (r *subscriptionRepository) LastEnded(ctx context.Context, userID string) (
 	return s, MapError(err)
 }
 
+// priceOn is what plan p costs at an instant: its regular price once the last day of the launch price is over in
+// Tunis (UTC+1 all year), else its price. A reminder names what the renewal will cost: the price on the day the
+// period ends, or today's once it has lapsed.
+func priceOn(instant string) string {
+	return `CASE WHEN p.launch_ends_on IS NOT NULL AND ((` + instant + ` AT TIME ZONE 'UTC') + interval '1 hour')::date > p.launch_ends_on
+			THEN p.regular_price ELSE p.price END AS price`
+}
+
 // reminderQueries claim the subscriptions of one stage. The inner SELECT locks the rows it takes, so two instances
 // never claim the same subscription.
 var reminderQueries = map[string]string{
@@ -132,7 +140,7 @@ var reminderQueries = map[string]string{
 			  AND ends_at > now() AND ends_at <= now() + make_interval(secs => $1)
 			  AND due_reminded_for IS DISTINCT FROM ends_at
 			ORDER BY ends_at LIMIT $2 FOR UPDATE SKIP LOCKED)
-		RETURNING s.id, s.user_id, s.plan_id, p.name, p.price, s.ends_at`,
+		RETURNING s.id, s.user_id, s.plan_id, p.name, ` + priceOn("s.ends_at") + `, s.ends_at`,
 	db.ReminderLapsed: `
 		UPDATE subscriptions s SET lapse_reminded_for = s.ends_at
 		FROM plans p
@@ -143,7 +151,7 @@ var reminderQueries = map[string]string{
 			  AND l.lapse_reminded_for IS DISTINCT FROM l.ends_at
 			  AND NOT EXISTS (SELECT 1 FROM subscriptions a WHERE a.user_id = l.user_id AND a.status = 'active' AND a.ends_at > now())
 			ORDER BY l.ends_at LIMIT $2 FOR UPDATE SKIP LOCKED)
-		RETURNING s.id, s.user_id, s.plan_id, p.name, p.price, s.ends_at`,
+		RETURNING s.id, s.user_id, s.plan_id, p.name, ` + priceOn("now()") + `, s.ends_at`,
 }
 
 func (r *subscriptionRepository) ClaimReminders(ctx context.Context, stage string, window time.Duration, limit int) ([]db.RenewalReminder, error) {

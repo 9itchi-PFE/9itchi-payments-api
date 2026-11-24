@@ -2,6 +2,7 @@ package services
 
 import (
 	"net/http"
+	"time"
 
 	"9itchi-payments-api/core"
 	"9itchi-payments-api/pkg/account"
@@ -25,10 +26,13 @@ type Clients struct {
 
 func InitServices(config utils.AppConfig, repos *repositories.Repositories) *Services {
 	providers := core.NewProviderFactory(config, &http.Client{Timeout: core.FlouciHTTPTimeout})
+	// Everything that charges or shows a price to a student reads the plans at today's price; the admin service
+	// keeps the plans as they were typed.
+	priced := PricedPlans(repos.Plan, time.Now)
 	return &Services{
 		Plan:         NewPlanService(repos.Plan, repos.Subscription),
-		Promo:        NewPromoService(repos.Promo, repos.Plan),
-		Subscription: NewSubscriptionService(repos.Subscription, repos.Plan, repos.Promo, repos.Payment, repos.Store, providers, core.NewPublisher(config.RabbitMQURL)),
+		Promo:        NewPromoService(repos.Promo, priced),
+		Subscription: NewSubscriptionService(repos.Subscription, priced, repos.Promo, repos.Payment, repos.Store, providers, core.NewPublisher(config.RabbitMQURL)),
 		Issuer:       NewIssuerService(repos.Issuer),
 		Clients: &Clients{
 			Account: account.New(config.AccountAPIURL, config.InternalAPIKey),

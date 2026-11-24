@@ -16,6 +16,8 @@ A completed payment gets a receipt number (`receipt_no`, shown as `<year>-<6 dig
 
 A plan can carry a `regular_price`: what it normally costs, shown struck through next to `price`, which stays the amount charged. It must be above `price`. `PUT /admin/plans/:id` replaces the whole plan, so leaving `regular_price` out removes it. A payment keeps the regular price of the day it was opened (`regular_millimes`), so its receipt goes on showing the difference after the plan changes.
 
+The launch price can have a last day, `launch_ends_on` (`YYYY-MM-DD`, set by the admin with the plan; it needs a `regular_price`). From the next day in Tunis the plan costs its regular price for everyone: `GET /plans`, the checkout, the promo codes and `GET /subscriptions/me` then return `price` = the regular price, with no `regular_price` and no `launch_ends_on`. Before that, `GET /plans` carries `launch_ends_on` so the student can be told until when. `GET /admin/plans` always returns the plan as it was typed. A payment already opened keeps its amount. A renewal reminder names the price of the day the period ends.
+
 The legal information printed on receipts (`legal_name`, `address`, `tax_id`, `vat_mention`) lives in one row of `receipt_issuer`, seeded empty. An empty field is simply not known yet: the receipt shows a blank for it, and `complete` turns true once all four are filled in. The admin fills them in with `PUT /admin/receipt-issuer` (full replacement, empty values allowed). Receipts always print the current values. `vat_mention` is free text (for example the wording the accountant gives); nothing is computed from it.
 
 ## Endpoints

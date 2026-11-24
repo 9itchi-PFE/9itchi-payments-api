@@ -585,3 +585,50 @@ func TestRenewalReminders(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, []string{b}, ids(two))
 }
+
+func TestPlanLaunchEnd(t *testing.T) {
+	store := newTestStore(t)
+	plans := NewPlanRepository(store)
+	subs := NewSubscriptionRepository(store)
+	ctx := context.Background()
+	regular := 50.0
+	last := time.Date(2027, 1, 31, 0, 0, 0, 0, time.UTC)
+
+	p, err := plans.Create(ctx, &db.Plan{Name: "Lancement", Price: 35, RegularPrice: &regular, LaunchEndsOn: &last, DurationDays: 30, Quotas: map[string]int{}, Active: true})
+	require.NoError(t, err)
+	require.NotNil(t, p.LaunchEndsOn)
+	assert.Equal(t, "2027-01-31", p.LaunchEndsOn.Format(time.DateOnly))
+
+	got, err := plans.GetByID(ctx, p.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "2027-01-31", got.LaunchEndsOn.Format(time.DateOnly))
+
+	// Updating without a day removes the end.
+	got, err = plans.Update(ctx, p.ID, &db.Plan{Name: "Lancement", Price: 35, RegularPrice: &regular, DurationDays: 30, Quotas: map[string]int{}, Active: true})
+	require.NoError(t, err)
+	assert.Nil(t, got.LaunchEndsOn)
+
+	// An end without a regular price to go back to is refused by the table too.
+	_, err = plans.Update(ctx, p.ID, &db.Plan{Name: "Lancement", Price: 35, LaunchEndsOn: &last, DurationDays: 30, Quotas: map[string]int{}, Active: true})
+	assert.Error(t, err)
+
+	// A reminder names what the renewal will cost: the regular price when the period ends after the launch.
+	yesterday := time.Now().UTC().AddDate(0, 0, -1).Truncate(24 * time.Hour)
+	inTenDays := time.Now().UTC().AddDate(0, 0, 10).Truncate(24 * time.Hour)
+	over, err := plans.Create(ctx, &db.Plan{Name: "Fini", Price: 35, RegularPrice: &regular, LaunchEndsOn: &yesterday, DurationDays: 30, Quotas: map[string]int{}, Active: true})
+	require.NoError(t, err)
+	still, err := plans.Create(ctx, &db.Plan{Name: "En cours", Price: 35, RegularPrice: &regular, LaunchEndsOn: &inTenDays, DurationDays: 30, Quotas: map[string]int{}, Active: true})
+	require.NoError(t, err)
+	for i, planID := range []string{over.ID, still.ID} {
+		_, err := store.Conn(ctx).Exec(ctx, `INSERT INTO subscriptions (user_id, plan_id, status, amount, starts_at, ends_at)
+			VALUES ($1, $2, 'active', 35, now() - interval '27 days', now() + interval '3 days')`, fmt.Sprintf("00000000-0000-0000-0000-%012d", 900+i), planID)
+		require.NoError(t, err)
+	}
+	due, err := subs.ClaimReminders(ctx, db.ReminderDue, 7*24*time.Hour, 10)
+	require.NoError(t, err)
+	prices := map[string]float64{}
+	for _, r := range due {
+		prices[r.PlanID] = r.PlanPrice
+	}
+	assert.Equal(t, map[string]float64{over.ID: 50, still.ID: 35}, prices)
+}
