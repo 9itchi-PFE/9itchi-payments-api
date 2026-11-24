@@ -348,34 +348,89 @@ func TestWebhook(t *testing.T) {
 	})
 }
 
-func TestCancelSubscription(t *testing.T) {
+func TestStopAndResumeSubscription(t *testing.T) {
 	ctx := context.Background()
+	ends := fixedNow.AddDate(0, 0, 20)
 	active := func(context.Context, string) (*db.Subscription, error) {
-		return &db.Subscription{ID: "s1", PlanID: planA}, nil
+		return &db.Subscription{ID: "s1", PlanID: planA, EndsAt: ends}, nil
 	}
-	t.Run("success", func(t *testing.T) {
-		cancelled := ""
-		subs := &mocks.SubscriptionRepository{GetActiveByUserFn: active, CancelFn: func(_ context.Context, uid string) error { cancelled = uid; return nil }}
+	t.Run("stopping keeps the subscription until it ends", func(t *testing.T) {
+		var asked *bool
+		subs := &mocks.SubscriptionRepository{GetActiveByUserFn: active, SetRenewalFn: func(_ context.Context, uid string, renews bool) (*db.Subscription, error) {
+			assert.Equal(t, userID, uid)
+			asked = &renews
+			return &db.Subscription{ID: "s1", PlanID: planA, Status: "active", EndsAt: ends, StoppedAt: &fixedNow}, nil
+		}}
 		res, apiErr := newSubSvc(subs, activePlan(50), nil, nil, nil).CancelSubscription(ctx, userID)
 		require.Nil(t, apiErr)
-		assert.Equal(t, "subscription cancelled", res.Message)
-		assert.Equal(t, userID, cancelled)
+		require.NotNil(t, asked)
+		assert.False(t, *asked)
+		assert.False(t, res.Subscription.Renews)
+		assert.Equal(t, ends, res.Subscription.EndsAt)
+		assert.Equal(t, "active", res.Subscription.Status)
+		assert.False(t, res.IsFree)
+	})
+	t.Run("resuming", func(t *testing.T) {
+		subs := &mocks.SubscriptionRepository{GetActiveByUserFn: active, SetRenewalFn: func(_ context.Context, _ string, renews bool) (*db.Subscription, error) {
+			assert.True(t, renews)
+			return &db.Subscription{ID: "s1", PlanID: planA, Status: "active", EndsAt: ends}, nil
+		}}
+		res, apiErr := newSubSvc(subs, activePlan(50), nil, nil, nil).ResumeSubscription(ctx, userID)
+		require.Nil(t, apiErr)
+		assert.True(t, res.Subscription.Renews)
 	})
 	t.Run("no active subscription", func(t *testing.T) {
 		subs := &mocks.SubscriptionRepository{GetActiveByUserFn: func(context.Context, string) (*db.Subscription, error) { return nil, repositories.ErrNotFound }}
 		_, apiErr := newSubSvc(subs, activePlan(50), nil, nil, nil).CancelSubscription(ctx, userID)
 		require.NotNil(t, apiErr)
 		assert.Equal(t, http.StatusNotFound, apiErr.Code)
+		_, apiErr = newSubSvc(subs, activePlan(50), nil, nil, nil).ResumeSubscription(ctx, userID)
+		require.NotNil(t, apiErr)
+		assert.Equal(t, http.StatusNotFound, apiErr.Code)
 	})
-	t.Run("free plan cannot be cancelled", func(t *testing.T) {
-		subs := &mocks.SubscriptionRepository{GetActiveByUserFn: active, CancelFn: func(context.Context, string) error {
-			t.Fatal("must not cancel")
-			return nil
+	t.Run("the free plan has nothing to stop", func(t *testing.T) {
+		subs := &mocks.SubscriptionRepository{GetActiveByUserFn: active, SetRenewalFn: func(context.Context, string, bool) (*db.Subscription, error) {
+			t.Fatal("must not touch the subscription")
+			return nil, nil
 		}}
 		_, apiErr := newSubSvc(subs, activePlan(0), nil, nil, nil).CancelSubscription(ctx, userID)
 		require.NotNil(t, apiErr)
 		assert.Equal(t, http.StatusNotFound, apiErr.Code)
 	})
+	t.Run("bad user id", func(t *testing.T) {
+		_, apiErr := newSubSvc(nil, nil, nil, nil, nil).CancelSubscription(ctx, "x")
+		require.NotNil(t, apiErr)
+		assert.Equal(t, http.StatusBadRequest, apiErr.Code)
+	})
+}
+
+func TestMySubscriptionLapsed(t *testing.T) {
+	ctx := context.Background()
+	plans := &mocks.PlanRepository{GetByNameFn: func(context.Context, string) (*db.Plan, error) { return freePlan, nil }}
+	none := func(context.Context, string) (*db.Subscription, error) { return nil, repositories.ErrNotFound }
+	ended := fixedNow.AddDate(0, 0, -2)
+	last := func(sub *db.Subscription, err error) *mocks.SubscriptionRepository {
+		return &mocks.SubscriptionRepository{GetActiveByUserFn: none, LastEndedFn: func(context.Context, string) (*db.Subscription, error) { return sub, err }}
+	}
+
+	res, apiErr := newSubSvc(last(&db.Subscription{ID: "old", PlanID: planA, EndsAt: ended}, nil), plans, nil, nil, nil).MySubscription(ctx, userID)
+	require.Nil(t, apiErr)
+	assert.True(t, res.IsFree)
+	require.NotNil(t, res.Lapsed, "ended without being stopped: the renewal is due")
+	assert.Equal(t, "old", res.Lapsed.ID)
+	assert.True(t, res.Lapsed.Renews)
+
+	res, apiErr = newSubSvc(last(&db.Subscription{ID: "old", PlanID: planA, EndsAt: ended, StoppedAt: &ended}, nil), plans, nil, nil, nil).MySubscription(ctx, userID)
+	require.Nil(t, apiErr)
+	assert.Nil(t, res.Lapsed, "the student stopped it: nothing is asked")
+
+	res, apiErr = newSubSvc(last(nil, repositories.ErrNotFound), plans, nil, nil, nil).MySubscription(ctx, userID)
+	require.Nil(t, apiErr)
+	assert.Nil(t, res.Lapsed, "never subscribed")
+
+	_, apiErr = newSubSvc(last(nil, errors.New("db down")), plans, nil, nil, nil).MySubscription(ctx, userID)
+	require.NotNil(t, apiErr)
+	assert.Equal(t, http.StatusInternalServerError, apiErr.Code)
 }
 
 func TestListPayments(t *testing.T) {

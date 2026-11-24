@@ -41,7 +41,7 @@ func MySubscription(svc services.SubscriptionService) gin.HandlerFunc {
 	}
 }
 
-// CancelSubscription: POST /subscriptions/cancel (user) cancel the active paid subscription.
+// CancelSubscription: POST /subscriptions/cancel (user) stop the renewal; access lasts until the period ends.
 func CancelSubscription(svc services.SubscriptionService) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		result, apiErr := svc.CancelSubscription(c.Request.Context(), c.GetString("user_id"))
@@ -93,6 +93,18 @@ func ListPayments(svc services.SubscriptionService) gin.HandlerFunc {
 func VerifyPayment(svc services.SubscriptionService) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		result, apiErr := svc.VerifyPayment(c.Request.Context(), c.GetString("user_id"), c.Param("id"))
+		if apiErr != nil {
+			models.FormatError(c, apiErr)
+			return
+		}
+		c.JSON(http.StatusOK, result)
+	}
+}
+
+// ResumeSubscription: POST /subscriptions/resume (user) renew again a stopped subscription that has not ended.
+func ResumeSubscription(svc services.SubscriptionService) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		result, apiErr := svc.ResumeSubscription(c.Request.Context(), c.GetString("user_id"))
 		if apiErr != nil {
 			models.FormatError(c, apiErr)
 			return

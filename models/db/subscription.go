@@ -12,6 +12,8 @@ type Subscription struct {
 	Amount      float64   `db:"amount" json:"amount"`
 	StartsAt    time.Time `db:"starts_at" json:"starts_at"`
 	EndsAt      time.Time `db:"ends_at" json:"ends_at"`
-	CreatedAt   time.Time `db:"created_at" json:"created_at"`
-	UpdatedAt   time.Time `db:"updated_at" json:"updated_at"`
+	// StoppedAt is when the student stopped the renewal; nil means a new payment is asked when the period ends.
+	StoppedAt *time.Time `db:"stopped_at" json:"stopped_at"`
+	CreatedAt time.Time  `db:"created_at" json:"created_at"`
+	UpdatedAt time.Time  `db:"updated_at" json:"updated_at"`
 }

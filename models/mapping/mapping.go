@@ -31,6 +31,6 @@ func PromoToResponse(p *db.PromoCode) api.PromoResponse {
 func SubscriptionToResponse(s *db.Subscription) *api.SubscriptionResponse {
 	return &api.SubscriptionResponse{
 		ID: s.ID, PlanID: s.PlanID, PromoCodeID: s.PromoCodeID, Status: s.Status,
-		Amount: s.Amount, StartsAt: s.StartsAt, EndsAt: s.EndsAt,
+		Amount: s.Amount, StartsAt: s.StartsAt, EndsAt: s.EndsAt, Renews: s.StoppedAt == nil, StoppedAt: s.StoppedAt,
 	}
 }
