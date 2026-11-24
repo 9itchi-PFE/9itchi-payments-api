@@ -10,6 +10,10 @@ Config (all optional): `FLOUCI_BASE_URL` (default `https://developers.flouci.com
 
 The migrations seed a `Free` plan (price 0, 36500 days). Its quotas follow the product decision: `emails_per_month` 0 (no sending through 9itchi), `resumes` 1 (one CV version) and `cv_downloads` 1 (one free download, with the 9itchi logo). Paid plans are created by the admin (prices in TND). It is the fallback for users with no active subscription and cannot be renamed or deactivated.
 
+After paying, Flouci sends the browser back to `FRONTEND_URL/settings/billing?payment=success|failed&id=<payment_id>`. The query string is never trusted: the page calls `POST /payments/:id/verify`, which asks Flouci whether a pending payment is paid and completes it exactly like the webhook does (same transaction, replays are no-ops). The return page therefore works even when the webhook is late or cannot reach a local machine.
+
+A completed payment gets a receipt number (`receipt_no`, shown as `<year>-<6 digits>`) and the period it paid for (`period_start`, `period_end`; when it extends a running subscription the period starts where the current one ends). `GET /payments` returns them with the plan name, the promo code and the amounts in millimes.
+
 ## Endpoints
 
 | Method | Path | Access | Handler |
@@ -28,6 +32,8 @@ The migrations seed a `Free` plan (price 0, 36500 days). Its quotas follow the p
 | POST | `/subscriptions/checkout` | user | Checkout (plan_id, optional promo_code; returns payment_url, payment_id) |
 | GET | `/subscriptions/me` | user | MySubscription (active plan, else Free) |
 | POST | `/subscriptions/cancel` | user | CancelSubscription (active paid subscription, 404 if none) |
+| GET | `/payments` | user | ListPayments (completed payments, newest first: the receipts) |
+| POST | `/payments/:id/verify` | user | VerifyPayment (where a payment stands; a pending one is re-checked with Flouci) |
 | POST | `/webhooks/:provider` | public | Webhook (signature verified; 404 unknown provider, 401 bad signature) |
 
 ## Run

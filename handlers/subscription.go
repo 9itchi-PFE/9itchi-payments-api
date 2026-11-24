@@ -76,3 +76,27 @@ func Webhook(svc services.SubscriptionService) gin.HandlerFunc {
 		c.JSON(http.StatusOK, result)
 	}
 }
+
+// ListPayments: GET /payments (user) completed payments of the user, newest first (receipts).
+func ListPayments(svc services.SubscriptionService) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		result, apiErr := svc.ListPayments(c.Request.Context(), c.GetString("user_id"))
+		if apiErr != nil {
+			models.FormatError(c, apiErr)
+			return
+		}
+		c.JSON(http.StatusOK, result)
+	}
+}
+
+// VerifyPayment: POST /payments/:id/verify (user) where a payment stands, re-checked with the gateway.
+func VerifyPayment(svc services.SubscriptionService) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		result, apiErr := svc.VerifyPayment(c.Request.Context(), c.GetString("user_id"), c.Param("id"))
+		if apiErr != nil {
+			models.FormatError(c, apiErr)
+			return
+		}
+		c.JSON(http.StatusOK, result)
+	}
+}

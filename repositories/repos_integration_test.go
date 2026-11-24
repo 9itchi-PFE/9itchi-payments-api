@@ -359,3 +359,52 @@ func TestPaymentRepository(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "completed", got.Status)
 }
+
+func TestPaymentReceipts(t *testing.T) {
+	store := newTestStore(t)
+	plans := NewPlanRepository(store)
+	repo := NewPaymentRepository(store)
+	ctx := context.Background()
+	const user, other = "88888888-8888-8888-8888-888888888888", "99999999-8888-8888-8888-888888888888"
+
+	free, err := plans.GetByName(ctx, "Free")
+	require.NoError(t, err)
+	pay := func(u string) *db.Payment {
+		p, err := repo.Create(ctx, &db.Payment{UserID: u, PlanID: free.ID, Provider: "flouci", AmountMillimes: 35000})
+		require.NoError(t, err)
+		return p
+	}
+	first, second, pending, theirs := pay(user), pay(user), pay(user), pay(other)
+	assert.Nil(t, first.ReceiptNo, "no receipt number before the payment completes")
+
+	for _, p := range []*db.Payment{first, second, theirs} {
+		applied, err := repo.MarkCompleted(ctx, p.ID)
+		require.NoError(t, err)
+		require.True(t, applied)
+	}
+	start := time.Now().UTC().Truncate(time.Second)
+	require.NoError(t, repo.SetPeriod(ctx, first.ID, start, start.AddDate(0, 0, 30)))
+	_, err = store.Conn(ctx).Exec(ctx, `UPDATE payments SET period_end = period_start WHERE id = $1`, first.ID)
+	assert.Error(t, err, "a period ends after it starts")
+
+	got, err := repo.Get(ctx, user, first.ID)
+	require.NoError(t, err)
+	require.NotNil(t, got.ReceiptNo)
+	require.NotNil(t, got.PeriodEnd)
+	assert.Equal(t, start.AddDate(0, 0, 30), got.PeriodEnd.UTC())
+	_, err = repo.Get(ctx, other, first.ID)
+	assert.ErrorIs(t, err, ErrNotFound, "another user's payment")
+
+	list, err := repo.ListCompletedByUser(ctx, user, 10)
+	require.NoError(t, err)
+	require.Len(t, list, 2, "completed payments of this user only")
+	for _, p := range list {
+		assert.NotEqual(t, pending.ID, p.ID)
+		require.NotNil(t, p.ReceiptNo)
+	}
+	assert.NotEqual(t, *list[0].ReceiptNo, *list[1].ReceiptNo, "receipt numbers are unique")
+
+	list, err = repo.ListCompletedByUser(ctx, user, 1)
+	require.NoError(t, err)
+	assert.Len(t, list, 1)
+}

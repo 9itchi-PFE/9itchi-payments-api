@@ -377,3 +377,166 @@ func TestCancelSubscription(t *testing.T) {
 		assert.Equal(t, http.StatusNotFound, apiErr.Code)
 	})
 }
+
+func TestListPayments(t *testing.T) {
+	ctx := context.Background()
+	promoID, ref := "p1", "ref-1"
+	no := int64(123)
+	done := time.Date(2026, 11, 23, 10, 0, 0, 0, time.UTC)
+	end := done.AddDate(0, 0, 30)
+	pays := &mocks.PaymentRepository{ListCompletedFn: func(_ context.Context, uid string, limit int) ([]db.Payment, error) {
+		assert.Equal(t, userID, uid)
+		assert.Equal(t, maxReceipts, limit)
+		return []db.Payment{
+			{ID: payID, UserID: userID, PlanID: planA, PromoCodeID: &promoID, Provider: "flouci", ProviderRef: &ref, Status: "completed",
+				AmountMillimes: 30000, DiscountMillimes: 5000, CompletedAt: &done, ReceiptNo: &no, PeriodStart: &done, PeriodEnd: &end},
+			{ID: "older", UserID: userID, PlanID: planA, Provider: "flouci", Status: "completed", AmountMillimes: 35000},
+		}, nil
+	}}
+	planCalls := 0
+	plans := &mocks.PlanRepository{GetByIDFn: func(context.Context, string) (*db.Plan, error) {
+		planCalls++
+		return &db.Plan{ID: planA, Name: "Mensuel", DurationDays: 30}, nil
+	}}
+	promos := &mocks.PromoRepository{GetByIDFn: func(context.Context, string) (*db.PromoCode, error) { return &db.PromoCode{Code: "ENIS2027"}, nil }}
+
+	res, apiErr := newSubSvc(nil, plans, promos, pays, nil).ListPayments(ctx, userID)
+	require.Nil(t, apiErr)
+	require.Len(t, res.Items, 2)
+	got := res.Items[0]
+	assert.Equal(t, "2026-000123", got.ReceiptNo)
+	assert.Equal(t, "Mensuel", got.PlanName)
+	assert.Equal(t, 30, got.DurationDays)
+	assert.Equal(t, "ENIS2027", got.PromoCode)
+	assert.Equal(t, "ref-1", got.ProviderRef)
+	assert.EqualValues(t, 30000, got.AmountMillimes)
+	assert.Equal(t, &end, got.PeriodEnd)
+	assert.Empty(t, res.Items[1].ReceiptNo, "no number, no receipt number")
+	assert.Empty(t, res.Items[1].PromoCode)
+	assert.Equal(t, 1, planCalls, "one plan lookup for both payments")
+
+	// A plan deleted since leaves the name empty instead of failing the list.
+	gone := &mocks.PlanRepository{GetByIDFn: func(context.Context, string) (*db.Plan, error) { return nil, repositories.ErrNotFound }}
+	res, apiErr = newSubSvc(nil, gone, promos, pays, nil).ListPayments(ctx, userID)
+	require.Nil(t, apiErr)
+	assert.Empty(t, res.Items[0].PlanName)
+
+	_, apiErr = newSubSvc(nil, plans, promos, pays, nil).ListPayments(ctx, "x")
+	require.NotNil(t, apiErr)
+	assert.Equal(t, http.StatusBadRequest, apiErr.Code)
+
+	down := &mocks.PaymentRepository{ListCompletedFn: func(context.Context, string, int) ([]db.Payment, error) { return nil, errors.New("db down") }}
+	_, apiErr = newSubSvc(nil, plans, promos, down, nil).ListPayments(ctx, userID)
+	require.NotNil(t, apiErr)
+	assert.Equal(t, http.StatusInternalServerError, apiErr.Code)
+}
+
+func TestVerifyPayment(t *testing.T) {
+	ctx := context.Background()
+	ref := "ref-1"
+	plans := &mocks.PlanRepository{GetByIDFn: func(context.Context, string) (*db.Plan, error) {
+		return &db.Plan{ID: planA, Name: "Mensuel", DurationDays: 30}, nil
+	}}
+	// store is one payment row; MarkCompleted flips it like the table does.
+	store := func(status string) (*mocks.PaymentRepository, *db.Payment) {
+		row := &db.Payment{ID: payID, UserID: userID, PlanID: planA, Provider: core.FlouciProviderName, ProviderRef: &ref, Status: status, AmountMillimes: 35000}
+		return &mocks.PaymentRepository{
+			GetFn: func(_ context.Context, uid, id string) (*db.Payment, error) {
+				if uid != userID || id != payID {
+					return nil, repositories.ErrNotFound
+				}
+				c := *row
+				return &c, nil
+			},
+			MarkCompletedFn: func(context.Context, string) (bool, error) {
+				if row.Status != "pending" {
+					return false, nil
+				}
+				now, no := fixedNow, int64(7)
+				row.Status, row.CompletedAt, row.ReceiptNo = "completed", &now, &no
+				return true, nil
+			},
+			SetPeriodFn: func(_ context.Context, _ string, start, end time.Time) error {
+				row.PeriodStart, row.PeriodEnd = &start, &end
+				return nil
+			},
+		}, row
+	}
+	noSub := &mocks.SubscriptionRepository{
+		GetActiveByUserFn: func(context.Context, string) (*db.Subscription, error) { return nil, repositories.ErrNotFound },
+		CreateFn:          func(_ context.Context, s *db.Subscription) (*db.Subscription, error) { return s, nil },
+	}
+	gateway := func(paid bool, err error) *mocks.PaymentProvider {
+		return &mocks.PaymentProvider{VerifyPaymentFn: func(_ context.Context, r string) (bool, error) {
+			assert.Equal(t, "ref-1", r)
+			return paid, err
+		}}
+	}
+
+	t.Run("paid: completed without waiting for the webhook", func(t *testing.T) {
+		pays, row := store("pending")
+		svc := newSubSvc(noSub, plans, nil, pays, gateway(true, nil))
+		res, apiErr := svc.VerifyPayment(ctx, userID, payID)
+		require.Nil(t, apiErr)
+		assert.Equal(t, "completed", res.Status)
+		assert.Equal(t, "2026-000007", res.ReceiptNo)
+		assert.Equal(t, fixedNow, *row.PeriodStart)
+		assert.Equal(t, fixedNow.AddDate(0, 0, 30), *row.PeriodEnd)
+		assert.Equal(t, []string{core.EventPaymentCompleted, core.EventSubscriptionCreated}, eventsOf(svc))
+
+		// Asking again changes nothing and publishes nothing more.
+		res, apiErr = svc.VerifyPayment(ctx, userID, payID)
+		require.Nil(t, apiErr)
+		assert.Equal(t, "completed", res.Status)
+		assert.Len(t, eventsOf(svc), 2)
+	})
+	t.Run("extending the same plan: the period starts where the current one ends", func(t *testing.T) {
+		pays, row := store("pending")
+		curEnd := fixedNow.AddDate(0, 0, 10)
+		var extended time.Time
+		subs := &mocks.SubscriptionRepository{
+			GetActiveByUserFn: func(context.Context, string) (*db.Subscription, error) {
+				return &db.Subscription{ID: "s", PlanID: planA, EndsAt: curEnd}, nil
+			},
+			ExtendFn: func(_ context.Context, _ string, end time.Time) error { extended = end; return nil },
+		}
+		_, apiErr := newSubSvc(subs, plans, nil, pays, gateway(true, nil)).VerifyPayment(ctx, userID, payID)
+		require.Nil(t, apiErr)
+		assert.Equal(t, curEnd.AddDate(0, 0, 30), extended)
+		assert.Equal(t, curEnd, *row.PeriodStart)
+		assert.Equal(t, extended, *row.PeriodEnd)
+	})
+	t.Run("not paid yet or gateway down: still pending", func(t *testing.T) {
+		for _, g := range []*mocks.PaymentProvider{gateway(false, nil), gateway(false, core.ErrProviderUnavailable)} {
+			pays, row := store("pending")
+			res, apiErr := newSubSvc(noSub, plans, nil, pays, g).VerifyPayment(ctx, userID, payID)
+			require.Nil(t, apiErr)
+			assert.Equal(t, "pending", res.Status)
+			assert.Equal(t, "pending", row.Status)
+			assert.Empty(t, res.ReceiptNo)
+		}
+	})
+	t.Run("failed payment is reported as is, the gateway is not asked", func(t *testing.T) {
+		pays, _ := store("failed")
+		prov := &mocks.PaymentProvider{VerifyPaymentFn: func(context.Context, string) (bool, error) {
+			t.Fatal("must not ask the gateway")
+			return false, nil
+		}}
+		res, apiErr := newSubSvc(noSub, plans, nil, pays, prov).VerifyPayment(ctx, userID, payID)
+		require.Nil(t, apiErr)
+		assert.Equal(t, "failed", res.Status)
+	})
+	t.Run("someone else's payment, bad ids", func(t *testing.T) {
+		pays, _ := store("pending")
+		svc := newSubSvc(noSub, plans, nil, pays, gateway(true, nil))
+		_, apiErr := svc.VerifyPayment(ctx, "11111111-2222-3333-4444-555555555555", payID)
+		require.NotNil(t, apiErr)
+		assert.Equal(t, http.StatusNotFound, apiErr.Code)
+		_, apiErr = svc.VerifyPayment(ctx, userID, "nope")
+		require.NotNil(t, apiErr)
+		assert.Equal(t, http.StatusBadRequest, apiErr.Code)
+		_, apiErr = svc.VerifyPayment(ctx, "x", payID)
+		require.NotNil(t, apiErr)
+		assert.Equal(t, http.StatusBadRequest, apiErr.Code)
+	})
+}

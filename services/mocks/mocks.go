@@ -8,6 +8,7 @@ import (
 
 	"9itchi-payments-api/core"
 	"9itchi-payments-api/models/db"
+	"9itchi-payments-api/repositories"
 )
 
 type PlanRepository struct {
@@ -169,6 +170,30 @@ type PaymentRepository struct {
 	GetByProviderRefFn func(ctx context.Context, provider, ref string) (*db.Payment, error)
 	MarkCompletedFn    func(ctx context.Context, id string) (bool, error)
 	MarkFailedFn       func(ctx context.Context, id string) error
+	SetPeriodFn        func(ctx context.Context, id string, start, end time.Time) error
+	GetFn              func(ctx context.Context, userID, id string) (*db.Payment, error)
+	ListCompletedFn    func(ctx context.Context, userID string, limit int) ([]db.Payment, error)
+}
+
+func (m *PaymentRepository) SetPeriod(ctx context.Context, id string, start, end time.Time) error {
+	if m.SetPeriodFn == nil {
+		return nil
+	}
+	return m.SetPeriodFn(ctx, id, start, end)
+}
+
+func (m *PaymentRepository) Get(ctx context.Context, userID, id string) (*db.Payment, error) {
+	if m.GetFn == nil {
+		return nil, repositories.ErrNotFound
+	}
+	return m.GetFn(ctx, userID, id)
+}
+
+func (m *PaymentRepository) ListCompletedByUser(ctx context.Context, userID string, limit int) ([]db.Payment, error) {
+	if m.ListCompletedFn == nil {
+		return nil, nil
+	}
+	return m.ListCompletedFn(ctx, userID, limit)
 }
 
 func (m *PaymentRepository) Create(ctx context.Context, p *db.Payment) (*db.Payment, error) {

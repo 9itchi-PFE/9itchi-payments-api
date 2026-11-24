@@ -70,6 +70,15 @@ type mockSubSvc struct {
 func (m *mockSubSvc) Checkout(_ context.Context, _ string, r api.CheckoutRequest) (*api.CheckoutResponse, *models.ApiError) {
 	return m.checkout(r)
 }
+func (m *mockSubSvc) ListPayments(context.Context, string) (*api.PaymentListResponse, *models.ApiError) {
+	return &api.PaymentListResponse{Items: []api.PaymentResponse{{ID: "p1", Status: "completed", ReceiptNo: "2026-000001"}}}, nil
+}
+func (m *mockSubSvc) VerifyPayment(_ context.Context, _ string, id string) (*api.PaymentResponse, *models.ApiError) {
+	if id == "missing" {
+		return nil, &models.ApiError{Code: http.StatusNotFound, Error: errors.New("payment not found")}
+	}
+	return &api.PaymentResponse{ID: id, Status: "pending"}, nil
+}
 func (m *mockSubSvc) MySubscription(_ context.Context, uid string) (*api.MySubscriptionResponse, *models.ApiError) {
 	return m.me(uid)
 }
@@ -242,4 +251,17 @@ func TestCancelSubscriptionHandler(t *testing.T) {
 	w := do(http.MethodPost, "/subscriptions/cancel", "/subscriptions/cancel", "", CancelSubscription(&mockSubSvc{}))
 	assert.Equal(t, http.StatusOK, w.Code)
 	assert.JSONEq(t, `{"message":"subscription cancelled"}`, w.Body.String())
+}
+
+func TestPaymentHandlers(t *testing.T) {
+	w := do(http.MethodGet, "/payments", "/payments", "", ListPayments(&mockSubSvc{}))
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Contains(t, w.Body.String(), `"receipt_no":"2026-000001"`)
+
+	w = do(http.MethodPost, "/payments/:id/verify", "/payments/p1/verify", "", VerifyPayment(&mockSubSvc{}))
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Contains(t, w.Body.String(), `"status":"pending"`)
+
+	w = do(http.MethodPost, "/payments/:id/verify", "/payments/missing/verify", "", VerifyPayment(&mockSubSvc{}))
+	assert.Equal(t, http.StatusNotFound, w.Code)
 }

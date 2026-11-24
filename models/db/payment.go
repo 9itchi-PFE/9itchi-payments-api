@@ -14,6 +14,10 @@ type Payment struct {
 	AmountMillimes   int64      `db:"amount_millimes" json:"amount_millimes"`
 	DiscountMillimes int64      `db:"discount_millimes" json:"discount_millimes"`
 	CompletedAt      *time.Time `db:"completed_at" json:"completed_at"`
-	CreatedAt        time.Time  `db:"created_at" json:"created_at"`
-	UpdatedAt        time.Time  `db:"updated_at" json:"updated_at"`
+	// ReceiptNo is set when the payment completes; PeriodStart and PeriodEnd are the days it paid for.
+	ReceiptNo   *int64     `db:"receipt_no" json:"receipt_no"`
+	PeriodStart *time.Time `db:"period_start" json:"period_start"`
+	PeriodEnd   *time.Time `db:"period_end" json:"period_end"`
+	CreatedAt   time.Time  `db:"created_at" json:"created_at"`
+	UpdatedAt   time.Time  `db:"updated_at" json:"updated_at"`
 }

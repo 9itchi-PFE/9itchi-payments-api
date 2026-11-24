@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"net/url"
 
 	"9itchi-payments-api/utils"
 )
@@ -21,6 +22,12 @@ var (
 type CheckoutRequest struct {
 	PaymentID      string
 	AmountMillimes int64
+}
+
+// ReturnPath is the page of the client the gateway sends the user back to; the client then asks
+// POST /payments/:id/verify what really happened (the query string is never trusted).
+func ReturnPath(paymentID, outcome string) string {
+	return "/settings/billing?payment=" + outcome + "&id=" + url.QueryEscape(paymentID)
 }
 
 // CheckoutResult is the provider's reference for the payment and the URL the user pays at.

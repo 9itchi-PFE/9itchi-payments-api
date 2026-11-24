@@ -36,6 +36,8 @@ func initializeRoutes(r *gin.Engine, services *services.Services) {
 		userGroup.POST("/subscriptions/checkout", handlers.Checkout(services.Subscription))
 		userGroup.GET("/subscriptions/me", handlers.MySubscription(services.Subscription))
 		userGroup.POST("/subscriptions/cancel", handlers.CancelSubscription(services.Subscription))
+		userGroup.GET("/payments", handlers.ListPayments(services.Subscription))
+		userGroup.POST("/payments/:id/verify", handlers.VerifyPayment(services.Subscription))
 	}
 
 	// admin endpoints
