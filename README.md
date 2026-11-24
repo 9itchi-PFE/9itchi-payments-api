@@ -14,6 +14,10 @@ After paying, Flouci sends the browser back to `FRONTEND_URL/settings/billing?pa
 
 A completed payment gets a receipt number (`receipt_no`, shown as `<year>-<6 digits>`) and the period it paid for (`period_start`, `period_end`; when it extends a running subscription the period starts where the current one ends). `GET /payments` returns them with the plan name, the promo code and the amounts in millimes.
 
+A plan can carry a `regular_price`: what it normally costs, shown struck through next to `price`, which stays the amount charged. It must be above `price`. `PUT /admin/plans/:id` replaces the whole plan, so leaving `regular_price` out removes it.
+
+The legal information printed on receipts (`legal_name`, `address`, `tax_id`, `vat_mention`) lives in one row of `receipt_issuer`, seeded empty. An empty field is simply not known yet: the receipt shows a blank for it, and `complete` turns true once all four are filled in. The admin fills them in with `PUT /admin/receipt-issuer` (full replacement, empty values allowed). Receipts always print the current values. `vat_mention` is free text (for example the wording the accountant gives); nothing is computed from it.
+
 ## Endpoints
 
 | Method | Path | Access | Handler |
@@ -35,6 +39,8 @@ A completed payment gets a receipt number (`receipt_no`, shown as `<year>-<6 dig
 | POST | `/subscriptions/resume` | user | ResumeSubscription (renews again; 404 if none) |
 | GET | `/payments` | user | ListPayments (completed payments, newest first: the receipts) |
 | POST | `/payments/:id/verify` | user | VerifyPayment (where a payment stands; a pending one is re-checked with Flouci) |
+| GET | `/receipt-issuer` | user | GetReceiptIssuer (legal information for receipts; empty fields are not known yet) |
+| PUT | `/admin/receipt-issuer` | admin | UpdateReceiptIssuer (full replacement) |
 | POST | `/webhooks/:provider` | public | Webhook (signature verified; 404 unknown provider, 401 bad signature) |
 
 ## Run

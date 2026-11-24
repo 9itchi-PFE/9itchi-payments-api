@@ -57,6 +57,16 @@ func TestPlanRepository(t *testing.T) {
 	_, err = repo.Update(ctx, "00000000-0000-0000-0000-000000000000", &db.Plan{Name: "X", DurationDays: 1, Quotas: map[string]int{}})
 	assert.ErrorIs(t, err, ErrNotFound)
 
+	assert.Nil(t, updated.RegularPrice)
+	regular := 50.0
+	withRegular, err := repo.Update(ctx, pro.ID, &db.Plan{Name: "Pro", Price: 35, RegularPrice: &regular, DurationDays: 30, Quotas: map[string]int{}, Active: true})
+	require.NoError(t, err)
+	require.NotNil(t, withRegular.RegularPrice)
+	assert.InDelta(t, 50, *withRegular.RegularPrice, 0.001)
+	low := 35.0
+	_, err = repo.Update(ctx, pro.ID, &db.Plan{Name: "Pro", Price: 35, RegularPrice: &low, DurationDays: 30, Quotas: map[string]int{}, Active: true})
+	assert.Error(t, err, "CHECK regular_price > price")
+
 	off, err := repo.Deactivate(ctx, pro.ID)
 	require.NoError(t, err)
 	assert.False(t, off.Active)
@@ -437,4 +447,34 @@ func TestPaymentReceipts(t *testing.T) {
 	list, err = repo.ListCompletedByUser(ctx, user, 1)
 	require.NoError(t, err)
 	assert.Len(t, list, 1)
+}
+
+func TestIssuerRepository(t *testing.T) {
+	store := newTestStore(t)
+	repo := NewIssuerRepository(store)
+	ctx := context.Background()
+
+	empty, err := repo.Get(ctx)
+	require.NoError(t, err)
+	assert.Empty(t, empty.LegalName)
+	assert.Empty(t, empty.TaxID)
+	assert.Nil(t, empty.UpdatedBy)
+
+	const admin = "0b8f9a52-6d0e-4e0a-9d43-2f7c1e0d5a11"
+	out, err := repo.Update(ctx, admin, &db.ReceiptIssuer{LegalName: "Example SARL", TaxID: "0000000/A/A/M/000"})
+	require.NoError(t, err)
+	assert.Equal(t, "Example SARL", out.LegalName)
+	assert.Empty(t, out.Address)
+	require.NotNil(t, out.UpdatedBy)
+	assert.Equal(t, admin, *out.UpdatedBy)
+
+	again, err := repo.Get(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, "0000000/A/A/M/000", again.TaxID)
+
+	var rows int
+	require.NoError(t, store.Conn(ctx).QueryRow(ctx, `SELECT count(*) FROM receipt_issuer`).Scan(&rows))
+	assert.Equal(t, 1, rows, "the table holds one row")
+	_, err = store.Conn(ctx).Exec(ctx, `INSERT INTO receipt_issuer (id) VALUES (false)`)
+	assert.Error(t, err, "a second row is refused")
 }

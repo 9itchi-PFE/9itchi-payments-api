@@ -14,6 +14,7 @@ type Services struct {
 	Plan         PlanService
 	Promo        PromoService
 	Subscription SubscriptionService
+	Issuer       IssuerService
 	Clients      *Clients
 }
 
@@ -28,6 +29,7 @@ func InitServices(config utils.AppConfig, repos *repositories.Repositories) *Ser
 		Plan:         NewPlanService(repos.Plan, repos.Subscription),
 		Promo:        NewPromoService(repos.Promo, repos.Plan),
 		Subscription: NewSubscriptionService(repos.Subscription, repos.Plan, repos.Promo, repos.Payment, repos.Store, providers, core.LogPublisher{}),
+		Issuer:       NewIssuerService(repos.Issuer),
 		Clients: &Clients{
 			Account: account.New(config.AccountAPIURL, config.InternalAPIKey),
 		},

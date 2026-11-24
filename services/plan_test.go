@@ -61,6 +61,9 @@ func TestCreatePlan(t *testing.T) {
 		{"zero duration", func(r *api.CreatePlanRequest) { r.DurationDays = 0 }, nil, http.StatusBadRequest},
 		{"blank name", func(r *api.CreatePlanRequest) { r.Name = "  " }, nil, http.StatusBadRequest},
 		{"negative quota", func(r *api.CreatePlanRequest) { r.Quotas = map[string]int{"a": -1} }, nil, http.StatusBadRequest},
+		{"regular price above price", func(r *api.CreatePlanRequest) { r.RegularPrice = floatPtr(15) }, nil, 0},
+		{"regular price equal to price", func(r *api.CreatePlanRequest) { r.RegularPrice = floatPtr(10) }, nil, http.StatusBadRequest},
+		{"regular price below price", func(r *api.CreatePlanRequest) { r.RegularPrice = floatPtr(5) }, nil, http.StatusBadRequest},
 		{"duplicate name", func(r *api.CreatePlanRequest) {}, repositories.ErrConflict, http.StatusConflict},
 	}
 	for _, tc := range tests {
@@ -179,6 +182,40 @@ func TestGetQuotas(t *testing.T) {
 	})
 	t.Run("bad user id", func(t *testing.T) {
 		_, apiErr := NewPlanService(plans, nil).GetQuotas(context.Background(), "x")
+		require.NotNil(t, apiErr)
+		assert.Equal(t, http.StatusBadRequest, apiErr.Code)
+	})
+}
+
+func floatPtr(v float64) *float64 { return &v }
+
+func TestPlanRegularPrice(t *testing.T) {
+	const id = "44444444-4444-4444-4444-444444444444"
+	var saved *db.Plan
+	repo := &mocks.PlanRepository{
+		CreateFn: func(_ context.Context, p *db.Plan) (*db.Plan, error) { saved = p; return p, nil },
+		GetByIDFn: func(context.Context, string) (*db.Plan, error) {
+			return &db.Plan{ID: id, Name: "Pro", Active: true}, nil
+		},
+		UpdateFn: func(_ context.Context, _ string, p *db.Plan) (*db.Plan, error) { saved = p; return p, nil },
+	}
+	svc := NewPlanService(repo, &mocks.SubscriptionRepository{})
+	quotas := map[string]int{"resumes": 10}
+
+	res, apiErr := svc.CreatePlan(context.Background(), userID, api.CreatePlanRequest{Name: "Pro", Price: 35, RegularPrice: floatPtr(50), DurationDays: 30, Quotas: quotas})
+	require.Nil(t, apiErr)
+	require.NotNil(t, res.RegularPrice)
+	assert.Equal(t, 50.0, *res.RegularPrice)
+	assert.Equal(t, 50.0, *saved.RegularPrice)
+
+	t.Run("an update without it removes it", func(t *testing.T) {
+		res, apiErr := svc.UpdatePlan(context.Background(), userID, id, api.UpdatePlanRequest{Name: "Pro", Price: 35, DurationDays: 30, Quotas: quotas})
+		require.Nil(t, apiErr)
+		assert.Nil(t, res.RegularPrice)
+		assert.Nil(t, saved.RegularPrice)
+	})
+	t.Run("an update below the price is refused", func(t *testing.T) {
+		_, apiErr := svc.UpdatePlan(context.Background(), userID, id, api.UpdatePlanRequest{Name: "Pro", Price: 35, RegularPrice: floatPtr(35), DurationDays: 30, Quotas: quotas})
 		require.NotNil(t, apiErr)
 		assert.Equal(t, http.StatusBadRequest, apiErr.Code)
 	})

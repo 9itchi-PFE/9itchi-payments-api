@@ -39,6 +39,7 @@ func initializeRoutes(r *gin.Engine, services *services.Services) {
 		userGroup.POST("/subscriptions/resume", handlers.ResumeSubscription(services.Subscription))
 		userGroup.GET("/payments", handlers.ListPayments(services.Subscription))
 		userGroup.POST("/payments/:id/verify", handlers.VerifyPayment(services.Subscription))
+		userGroup.GET("/receipt-issuer", handlers.GetReceiptIssuer(services.Issuer))
 	}
 
 	// admin endpoints
@@ -53,6 +54,7 @@ func initializeRoutes(r *gin.Engine, services *services.Services) {
 		adminGroup.POST("/admin/promo-codes", handlers.CreatePromo(services.Promo))
 		adminGroup.PUT("/admin/promo-codes/:id", handlers.UpdatePromo(services.Promo))
 		adminGroup.DELETE("/admin/promo-codes/:id", handlers.DeletePromo(services.Promo))
+		adminGroup.PUT("/admin/receipt-issuer", handlers.UpdateReceiptIssuer(services.Issuer))
 	}
 
 	// internal endpoints
