@@ -28,7 +28,7 @@ func InitServices(config utils.AppConfig, repos *repositories.Repositories) *Ser
 	return &Services{
 		Plan:         NewPlanService(repos.Plan, repos.Subscription),
 		Promo:        NewPromoService(repos.Promo, repos.Plan),
-		Subscription: NewSubscriptionService(repos.Subscription, repos.Plan, repos.Promo, repos.Payment, repos.Store, providers, core.LogPublisher{}),
+		Subscription: NewSubscriptionService(repos.Subscription, repos.Plan, repos.Promo, repos.Payment, repos.Store, providers, core.NewPublisher(config.RabbitMQURL)),
 		Issuer:       NewIssuerService(repos.Issuer),
 		Clients: &Clients{
 			Account: account.New(config.AccountAPIURL, config.InternalAPIKey),

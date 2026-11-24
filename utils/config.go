@@ -43,7 +43,7 @@ func LoadConfig() AppConfig {
 		EncryptionKey:          getStringWithDefault("ITCHI_ENCRYPTION_KEY", ""),
 		InternalAPIKey:         getStringWithDefault("INTERNAL_API_KEY", ""),
 		InternalAPIKeyRequired: getBoolWithDefault("INTERNAL_API_KEY_REQUIRED", true),
-		RabbitMQURL:            getStringWithDefault("RABBITMQ_URL", "amqp://guest:guest@localhost:5672/"),
+		RabbitMQURL:            getStringWithDefault("RABBITMQ_URL", ""),
 		AccountAPIURL:          getStringWithDefault("ACCOUNT_API_URL", "http://9itchi-account-api:8081"),
 		FlouciBaseURL:          getStringWithDefault("FLOUCI_BASE_URL", "https://developers.flouci.com"),
 		FlouciPublicKey:        getStringWithDefault("FLOUCI_PUBLIC_KEY", ""),
