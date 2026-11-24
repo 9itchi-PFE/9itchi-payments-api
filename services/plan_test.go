@@ -19,7 +19,7 @@ import (
 
 const userID = "33333333-3333-3333-3333-333333333333"
 
-var freePlan = &db.Plan{ID: "f", Name: FreePlanName, Active: true, Quotas: map[string]int{"emails_per_month": 20, "resumes": 3}}
+var freePlan = &db.Plan{ID: "f", Name: FreePlanName, Active: true, Quotas: map[string]int{"emails_per_month": 0, "resumes": 1, "cv_downloads": 1}}
 
 func TestListPlans(t *testing.T) {
 	for _, onlyActive := range []bool{true, false} {
@@ -167,7 +167,7 @@ func TestGetQuotas(t *testing.T) {
 		res, apiErr := NewPlanService(plans, subs).GetQuotas(context.Background(), userID)
 		require.Nil(t, apiErr)
 		assert.Equal(t, FreePlanName, res.PlanName)
-		assert.Equal(t, 3, res.Quotas["resumes"])
+		assert.Equal(t, 1, res.Quotas["resumes"])
 	})
 	t.Run("subscription lookup failure", func(t *testing.T) {
 		subs := &mocks.SubscriptionRepository{GetActiveByUserFn: func(context.Context, string) (*db.Subscription, error) {

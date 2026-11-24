@@ -33,7 +33,7 @@ func TestPlanRepository(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, 0.0, free.Price)
 	assert.Equal(t, 36500, free.DurationDays)
-	assert.Equal(t, map[string]int{"emails_per_month": 20, "resumes": 3}, free.Quotas)
+	assert.Equal(t, map[string]int{"emails_per_month": 0, "resumes": 1, "cv_downloads": 1}, free.Quotas)
 
 	pro, err := repo.Create(ctx, &db.Plan{Name: "Pro", Price: 9.99, DurationDays: 30, Quotas: map[string]int{"resumes": 10}, Active: true})
 	require.NoError(t, err)
