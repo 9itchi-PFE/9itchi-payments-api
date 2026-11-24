@@ -124,3 +124,27 @@ func SendRenewalReminders(svc services.SubscriptionService) gin.HandlerFunc {
 		c.JSON(http.StatusOK, result)
 	}
 }
+
+// UserSubscription: GET /admin/users/:id/subscription (admin) the plan and subscription of one student.
+func UserSubscription(svc services.SubscriptionService) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		result, apiErr := svc.MySubscription(c.Request.Context(), c.Param("id"))
+		if apiErr != nil {
+			models.FormatError(c, apiErr)
+			return
+		}
+		c.JSON(http.StatusOK, result)
+	}
+}
+
+// UserPayments: GET /admin/users/:id/payments (admin) the completed payments of one student.
+func UserPayments(svc services.SubscriptionService) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		result, apiErr := svc.ListPayments(c.Request.Context(), c.Param("id"))
+		if apiErr != nil {
+			models.FormatError(c, apiErr)
+			return
+		}
+		c.JSON(http.StatusOK, result)
+	}
+}
