@@ -134,6 +134,8 @@ func TestCreatePlanHandler(t *testing.T) {
 	}{
 		{"ok", `{"name":"Pro","price":10,"duration_days":30,"quotas":{"resumes":10}}`, http.StatusCreated},
 		{"negative price", `{"name":"Pro","price":-1,"duration_days":30,"quotas":{}}`, http.StatusBadRequest},
+		{"with regular price", `{"name":"Pro","price":35,"regular_price":50,"duration_days":30,"quotas":{}}`, http.StatusCreated},
+		{"zero regular price", `{"name":"Pro","price":35,"regular_price":0,"duration_days":30,"quotas":{}}`, http.StatusBadRequest},
 		{"zero duration", `{"name":"Pro","price":1,"duration_days":0,"quotas":{}}`, http.StatusBadRequest},
 		{"missing name", `{"price":1,"duration_days":5,"quotas":{}}`, http.StatusBadRequest},
 		{"bad json", `{`, http.StatusBadRequest},
@@ -271,4 +273,48 @@ func TestPaymentHandlers(t *testing.T) {
 
 	w = do(http.MethodPost, "/payments/:id/verify", "/payments/missing/verify", "", VerifyPayment(&mockSubSvc{}))
 	assert.Equal(t, http.StatusNotFound, w.Code)
+}
+
+type mockIssuerSvc struct{ fail bool }
+
+func (m *mockIssuerSvc) GetReceiptIssuer(context.Context) (*api.ReceiptIssuerResponse, *models.ApiError) {
+	if m.fail {
+		return nil, &models.ApiError{Code: http.StatusInternalServerError, Error: errors.New("internal server error")}
+	}
+	return &api.ReceiptIssuerResponse{LegalName: "Example SARL"}, nil
+}
+func (m *mockIssuerSvc) UpdateReceiptIssuer(_ context.Context, _ string, r api.UpdateReceiptIssuerRequest) (*api.ReceiptIssuerResponse, *models.ApiError) {
+	return &api.ReceiptIssuerResponse{LegalName: r.LegalName, TaxID: r.TaxID}, nil
+}
+
+func TestReceiptIssuerHandlers(t *testing.T) {
+	w := do(http.MethodGet, "/receipt-issuer", "/receipt-issuer", "", GetReceiptIssuer(&mockIssuerSvc{}))
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Contains(t, w.Body.String(), `"legal_name":"Example SARL"`)
+	assert.Contains(t, w.Body.String(), `"tax_id":""`, "an unknown field is sent empty, not left out")
+
+	w = do(http.MethodGet, "/receipt-issuer", "/receipt-issuer", "", GetReceiptIssuer(&mockIssuerSvc{fail: true}))
+	assert.Equal(t, http.StatusInternalServerError, w.Code)
+	assert.Contains(t, w.Body.String(), `"error"`)
+
+	tests := []struct {
+		name string
+		body string
+		want int
+	}{
+		{"ok", `{"legal_name":"Example SARL","tax_id":"0000000/A/A/M/000"}`, http.StatusOK},
+		{"all empty is allowed", `{}`, http.StatusOK},
+		{"legal name too long", `{"legal_name":"` + strings.Repeat("a", 201) + `"}`, http.StatusBadRequest},
+		{"tax id too long", `{"tax_id":"` + strings.Repeat("1", 51) + `"}`, http.StatusBadRequest},
+		{"bad json", `{`, http.StatusBadRequest},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			w := do(http.MethodPut, "/admin/receipt-issuer", "/admin/receipt-issuer", tc.body, UpdateReceiptIssuer(&mockIssuerSvc{}))
+			assert.Equal(t, tc.want, w.Code)
+			if tc.want != http.StatusOK {
+				assert.Contains(t, w.Body.String(), `"error"`)
+			}
+		})
+	}
 }

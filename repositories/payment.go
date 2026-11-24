@@ -9,7 +9,7 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-const paymentColumns = `id, user_id, plan_id, promo_code_id, provider, provider_ref, status, amount_millimes, discount_millimes, completed_at, receipt_no, period_start, period_end, created_at, updated_at`
+const paymentColumns = `id, user_id, plan_id, promo_code_id, provider, provider_ref, status, amount_millimes, discount_millimes, regular_millimes, completed_at, receipt_no, period_start, period_end, created_at, updated_at`
 
 // PaymentRepository is the only layer that touches PostgreSQL for payment data.
 type PaymentRepository interface {
@@ -42,9 +42,9 @@ func (r *paymentRepository) Create(ctx context.Context, p *db.Payment) (*db.Paym
 	ctx, cancel := QueryTimeout(ctx)
 	defer cancel()
 	rows, err := r.store.Conn(ctx).Query(ctx,
-		`INSERT INTO payments (user_id, plan_id, promo_code_id, provider, status, amount_millimes, discount_millimes)
-		 VALUES ($1, $2, $3, $4, COALESCE(NULLIF($5, ''), 'pending'), $6, $7) RETURNING `+paymentColumns,
-		p.UserID, p.PlanID, p.PromoCodeID, p.Provider, p.Status, p.AmountMillimes, p.DiscountMillimes)
+		`INSERT INTO payments (user_id, plan_id, promo_code_id, provider, status, amount_millimes, discount_millimes, regular_millimes)
+		 VALUES ($1, $2, $3, $4, COALESCE(NULLIF($5, ''), 'pending'), $6, $7, $8) RETURNING `+paymentColumns,
+		p.UserID, p.PlanID, p.PromoCodeID, p.Provider, p.Status, p.AmountMillimes, p.DiscountMillimes, p.RegularMillimes)
 	if err != nil {
 		return nil, MapError(err)
 	}

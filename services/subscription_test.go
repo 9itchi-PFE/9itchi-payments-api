@@ -437,6 +437,7 @@ func TestListPayments(t *testing.T) {
 	ctx := context.Background()
 	promoID, ref := "p1", "ref-1"
 	no := int64(123)
+	regular := int64(50000)
 	done := time.Date(2026, 11, 23, 10, 0, 0, 0, time.UTC)
 	end := done.AddDate(0, 0, 30)
 	pays := &mocks.PaymentRepository{ListCompletedFn: func(_ context.Context, uid string, limit int) ([]db.Payment, error) {
@@ -444,7 +445,7 @@ func TestListPayments(t *testing.T) {
 		assert.Equal(t, maxReceipts, limit)
 		return []db.Payment{
 			{ID: payID, UserID: userID, PlanID: planA, PromoCodeID: &promoID, Provider: "flouci", ProviderRef: &ref, Status: "completed",
-				AmountMillimes: 30000, DiscountMillimes: 5000, CompletedAt: &done, ReceiptNo: &no, PeriodStart: &done, PeriodEnd: &end},
+				AmountMillimes: 30000, DiscountMillimes: 5000, RegularMillimes: &regular, CompletedAt: &done, ReceiptNo: &no, PeriodStart: &done, PeriodEnd: &end},
 			{ID: "older", UserID: userID, PlanID: planA, Provider: "flouci", Status: "completed", AmountMillimes: 35000},
 		}, nil
 	}}
@@ -464,6 +465,9 @@ func TestListPayments(t *testing.T) {
 	assert.Equal(t, 30, got.DurationDays)
 	assert.Equal(t, "ENIS2027", got.PromoCode)
 	assert.Equal(t, "ref-1", got.ProviderRef)
+	require.NotNil(t, got.RegularMillimes)
+	assert.EqualValues(t, 50000, *got.RegularMillimes)
+	assert.Nil(t, res.Items[1].RegularMillimes, "a payment opened without a regular price has none")
 	assert.EqualValues(t, 30000, got.AmountMillimes)
 	assert.Equal(t, &end, got.PeriodEnd)
 	assert.Empty(t, res.Items[1].ReceiptNo, "no number, no receipt number")
@@ -594,4 +598,26 @@ func TestVerifyPayment(t *testing.T) {
 		require.NotNil(t, apiErr)
 		assert.Equal(t, http.StatusBadRequest, apiErr.Code)
 	})
+}
+
+func TestCheckoutKeepsRegularPrice(t *testing.T) {
+	regular := 50.0
+	plans := &mocks.PlanRepository{GetByIDFn: func(context.Context, string) (*db.Plan, error) {
+		return &db.Plan{ID: planA, Name: "Mensuel", Price: 35, RegularPrice: &regular, DurationDays: 30, Active: true}, nil
+	}}
+	var saved *db.Payment
+	pays := &mocks.PaymentRepository{CreateFn: func(_ context.Context, p *db.Payment) (*db.Payment, error) {
+		saved = p
+		c := *p
+		c.ID = payID
+		return &c, nil
+	}}
+	prov := &mocks.PaymentProvider{CreateCheckoutFn: func(_ context.Context, req core.CheckoutRequest) (core.CheckoutResult, error) {
+		assert.EqualValues(t, 35000, req.AmountMillimes, "the price charged is the plan's price, never the regular one")
+		return core.CheckoutResult{Ref: "ref-1", URL: "https://pay.example/ref-1"}, nil
+	}}
+	_, apiErr := newSubSvc(&mocks.SubscriptionRepository{}, plans, &mocks.PromoRepository{}, pays, prov).Checkout(context.Background(), userID, api.CheckoutRequest{PlanID: planA})
+	require.Nil(t, apiErr)
+	require.NotNil(t, saved.RegularMillimes)
+	assert.EqualValues(t, 50000, *saved.RegularMillimes)
 }

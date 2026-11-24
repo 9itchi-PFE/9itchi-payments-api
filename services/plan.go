@@ -19,7 +19,7 @@ type PlanService interface {
 	ListAllPlans(ctx context.Context) (*api.PlanListResponse, *models.ApiError)
 	// POST /admin/plans: create plan (price, duration, quotas)
 	CreatePlan(ctx context.Context, userID string, req api.CreatePlanRequest) (*api.PlanResponse, *models.ApiError)
-	// PUT /admin/plans/:id: edit plan
+	// PUT /admin/plans/:id: edit plan (full replacement: leaving regular_price out removes it)
 	UpdatePlan(ctx context.Context, userID string, id string, req api.UpdatePlanRequest) (*api.PlanResponse, *models.ApiError)
 	// DELETE /admin/plans/:id: deactivate plan
 	DeactivatePlan(ctx context.Context, userID string, id string) (*api.PlanResponse, *models.ApiError)
@@ -56,12 +56,15 @@ func (s *planService) list(ctx context.Context, onlyActive bool) (*api.PlanListR
 	return &api.PlanListResponse{Items: items}, nil
 }
 
-func validatePlanFields(name string, price float64, duration int, quotas map[string]int) *models.ApiError {
+func validatePlanFields(name string, price float64, regular *float64, duration int, quotas map[string]int) *models.ApiError {
 	if name == "" {
 		return badRequest("name is required")
 	}
 	if price < 0 {
 		return badRequest("price must be >= 0")
+	}
+	if regular != nil && *regular <= price {
+		return badRequest("regular_price must be above price")
 	}
 	if duration <= 0 {
 		return badRequest("duration_days must be > 0")
@@ -76,14 +79,14 @@ func validatePlanFields(name string, price float64, duration int, quotas map[str
 
 func (s *planService) CreatePlan(ctx context.Context, _ string, req api.CreatePlanRequest) (*api.PlanResponse, *models.ApiError) {
 	name := strings.TrimSpace(req.Name)
-	if apiErr := validatePlanFields(name, req.Price, req.DurationDays, req.Quotas); apiErr != nil {
+	if apiErr := validatePlanFields(name, req.Price, req.RegularPrice, req.DurationDays, req.Quotas); apiErr != nil {
 		return nil, apiErr
 	}
 	active := true
 	if req.Active != nil {
 		active = *req.Active
 	}
-	p, err := s.repo.Create(ctx, &db.Plan{Name: name, Price: req.Price, DurationDays: req.DurationDays, Quotas: req.Quotas, Active: active})
+	p, err := s.repo.Create(ctx, &db.Plan{Name: name, Price: req.Price, RegularPrice: req.RegularPrice, DurationDays: req.DurationDays, Quotas: req.Quotas, Active: active})
 	if err != nil {
 		return nil, repoError(err, "plan not found")
 	}
@@ -96,7 +99,7 @@ func (s *planService) UpdatePlan(ctx context.Context, _ string, id string, req a
 		return nil, badRequest("invalid plan id")
 	}
 	name := strings.TrimSpace(req.Name)
-	if apiErr := validatePlanFields(name, req.Price, req.DurationDays, req.Quotas); apiErr != nil {
+	if apiErr := validatePlanFields(name, req.Price, req.RegularPrice, req.DurationDays, req.Quotas); apiErr != nil {
 		return nil, apiErr
 	}
 	current, err := s.repo.GetByID(ctx, id)
@@ -111,7 +114,7 @@ func (s *planService) UpdatePlan(ctx context.Context, _ string, id string, req a
 	if current.Name == FreePlanName && (name != FreePlanName || !active) {
 		return nil, badRequest("the Free plan cannot be renamed or deactivated")
 	}
-	p, err := s.repo.Update(ctx, id, &db.Plan{Name: name, Price: req.Price, DurationDays: req.DurationDays, Quotas: req.Quotas, Active: active})
+	p, err := s.repo.Update(ctx, id, &db.Plan{Name: name, Price: req.Price, RegularPrice: req.RegularPrice, DurationDays: req.DurationDays, Quotas: req.Quotas, Active: active})
 	if err != nil {
 		return nil, repoError(err, "plan not found")
 	}

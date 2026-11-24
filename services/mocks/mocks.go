@@ -287,3 +287,22 @@ func (p *Publisher) Publish(_ context.Context, event string, _ any) error {
 	p.Events = append(p.Events, event)
 	return nil
 }
+
+type IssuerRepository struct {
+	GetFn    func(ctx context.Context) (*db.ReceiptIssuer, error)
+	UpdateFn func(ctx context.Context, userID string, i *db.ReceiptIssuer) (*db.ReceiptIssuer, error)
+}
+
+func (m *IssuerRepository) Get(ctx context.Context) (*db.ReceiptIssuer, error) {
+	if m.GetFn == nil {
+		return &db.ReceiptIssuer{}, nil
+	}
+	return m.GetFn(ctx)
+}
+
+func (m *IssuerRepository) Update(ctx context.Context, userID string, i *db.ReceiptIssuer) (*db.ReceiptIssuer, error) {
+	if m.UpdateFn == nil {
+		return i, nil
+	}
+	return m.UpdateFn(ctx, userID, i)
+}

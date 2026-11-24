@@ -11,7 +11,7 @@ func PlanToResponse(p *db.Plan) api.PlanResponse {
 		quotas = map[string]int{}
 	}
 	return api.PlanResponse{
-		ID: p.ID, Name: p.Name, Price: p.Price, DurationDays: p.DurationDays,
+		ID: p.ID, Name: p.Name, Price: p.Price, RegularPrice: p.RegularPrice, DurationDays: p.DurationDays,
 		Quotas: quotas, Active: p.Active, CreatedAt: p.CreatedAt, UpdatedAt: p.UpdatedAt,
 	}
 }

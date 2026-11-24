@@ -13,6 +13,7 @@ type Repositories struct {
 	Promo        PromoRepository
 	Subscription SubscriptionRepository
 	Payment      PaymentRepository
+	Issuer       IssuerRepository
 }
 
 // InitRepositories connects to PostgreSQL, applies migrations and builds the repositories.
@@ -30,6 +31,7 @@ func InitRepositories(ctx context.Context, config utils.AppConfig) (*Repositorie
 		Promo:        NewPromoRepository(store),
 		Subscription: NewSubscriptionRepository(store),
 		Payment:      NewPaymentRepository(store),
+		Issuer:       NewIssuerRepository(store),
 	}, nil
 }
 

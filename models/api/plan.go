@@ -4,8 +4,10 @@ import "time"
 
 // CreatePlanRequest is the validated body of CreatePlan.
 type CreatePlanRequest struct {
-	Name         string         `json:"name" binding:"required,max=100"`
-	Price        float64        `json:"price" binding:"gte=0"`
+	Name  string  `json:"name" binding:"required,max=100"`
+	Price float64 `json:"price" binding:"gte=0"`
+	// RegularPrice is the price shown struck through; it must be above Price. Leave it out when there is none.
+	RegularPrice *float64       `json:"regular_price" binding:"omitempty,gt=0"`
 	DurationDays int            `json:"duration_days" binding:"required,gt=0"`
 	Quotas       map[string]int `json:"quotas" binding:"required"`
 	Active       *bool          `json:"active"`
@@ -13,8 +15,10 @@ type CreatePlanRequest struct {
 
 // UpdatePlanRequest is the validated body of UpdatePlan (full replacement).
 type UpdatePlanRequest struct {
-	Name         string         `json:"name" binding:"required,max=100"`
-	Price        float64        `json:"price" binding:"gte=0"`
+	Name  string  `json:"name" binding:"required,max=100"`
+	Price float64 `json:"price" binding:"gte=0"`
+	// RegularPrice is the price shown struck through; it must be above Price. Leave it out when there is none.
+	RegularPrice *float64       `json:"regular_price" binding:"omitempty,gt=0"`
 	DurationDays int            `json:"duration_days" binding:"required,gt=0"`
 	Quotas       map[string]int `json:"quotas" binding:"required"`
 	Active       *bool          `json:"active"`
@@ -25,6 +29,7 @@ type PlanResponse struct {
 	ID           string         `json:"id"`
 	Name         string         `json:"name"`
 	Price        float64        `json:"price"`
+	RegularPrice *float64       `json:"regular_price,omitempty"`
 	DurationDays int            `json:"duration_days"`
 	Quotas       map[string]int `json:"quotas"`
 	Active       bool           `json:"active"`
