@@ -65,12 +65,18 @@ type mockSubSvc struct {
 	me       func(string) (*api.MySubscriptionResponse, *models.ApiError)
 	checkout func(api.CheckoutRequest) (*api.CheckoutResponse, *models.ApiError)
 	webhook  func(provider string, body []byte, signature string) (*api.MessageResponse, *models.ApiError)
+	// paymentsOf is the user whose payments were last asked for.
+	paymentsOf string
 }
 
 func (m *mockSubSvc) Checkout(_ context.Context, _ string, r api.CheckoutRequest) (*api.CheckoutResponse, *models.ApiError) {
 	return m.checkout(r)
 }
-func (m *mockSubSvc) ListPayments(context.Context, string) (*api.PaymentListResponse, *models.ApiError) {
+func (m *mockSubSvc) ListPayments(_ context.Context, uid string) (*api.PaymentListResponse, *models.ApiError) {
+	m.paymentsOf = uid
+	if uid == "nope" {
+		return nil, &models.ApiError{Code: http.StatusBadRequest, Error: errors.New("invalid user id")}
+	}
 	return &api.PaymentListResponse{Items: []api.PaymentResponse{{ID: "p1", Status: "completed", ReceiptNo: "2026-000001"}}}, nil
 }
 func (m *mockSubSvc) VerifyPayment(_ context.Context, _ string, id string) (*api.PaymentResponse, *models.ApiError) {
@@ -208,6 +214,29 @@ func TestMySubscriptionHandler(t *testing.T) {
 	assert.Equal(t, http.StatusOK, w.Code)
 	assert.Contains(t, w.Body.String(), `"is_free":true`)
 	assert.Contains(t, w.Body.String(), `"subscription":null`)
+}
+
+// The team reads the plan and the payments of the student named in the path, not their own.
+func TestUserSubscriptionAndPaymentsHandlers(t *testing.T) {
+	const student = "7c9e6679-7425-40de-944b-e07fc1f90ae7"
+	svc := &mockSubSvc{me: func(uid string) (*api.MySubscriptionResponse, *models.ApiError) {
+		if uid != student {
+			return nil, &models.ApiError{Code: http.StatusBadRequest, Error: errors.New("invalid user id")}
+		}
+		return &api.MySubscriptionResponse{IsFree: true, Plan: api.PlanResponse{Name: "Free"}}, nil
+	}}
+	w := do(http.MethodGet, "/admin/users/:id/subscription", "/admin/users/"+student+"/subscription", "", UserSubscription(svc))
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Contains(t, w.Body.String(), `"is_free":true`)
+	w = do(http.MethodGet, "/admin/users/:id/subscription", "/admin/users/nope/subscription", "", UserSubscription(svc))
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+
+	w = do(http.MethodGet, "/admin/users/:id/payments", "/admin/users/"+student+"/payments", "", UserPayments(svc))
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, student, svc.paymentsOf)
+	assert.Contains(t, w.Body.String(), `"receipt_no":"2026-000001"`)
+	w = do(http.MethodGet, "/admin/users/:id/payments", "/admin/users/nope/payments", "", UserPayments(svc))
+	assert.Equal(t, http.StatusBadRequest, w.Code)
 }
 
 func TestCheckoutHandler(t *testing.T) {

@@ -55,6 +55,8 @@ func initializeRoutes(r *gin.Engine, services *services.Services) {
 		adminGroup.PUT("/admin/promo-codes/:id", handlers.UpdatePromo(services.Promo))
 		adminGroup.DELETE("/admin/promo-codes/:id", handlers.DeletePromo(services.Promo))
 		adminGroup.PUT("/admin/receipt-issuer", handlers.UpdateReceiptIssuer(services.Issuer))
+		adminGroup.GET("/admin/users/:id/subscription", handlers.UserSubscription(services.Subscription))
+		adminGroup.GET("/admin/users/:id/payments", handlers.UserPayments(services.Subscription))
 	}
 
 	// internal endpoints

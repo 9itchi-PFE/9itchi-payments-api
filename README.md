@@ -44,6 +44,8 @@ The legal information printed on receipts (`legal_name`, `address`, `tax_id`, `v
 | POST | `/payments/:id/verify` | user | VerifyPayment (where a payment stands; a pending one is re-checked with Flouci) |
 | GET | `/receipt-issuer` | user | GetReceiptIssuer (legal information for receipts; empty fields are not known yet) |
 | PUT | `/admin/receipt-issuer` | admin | UpdateReceiptIssuer (full replacement) |
+| GET | `/admin/users/:id/subscription` | admin | UserSubscription (the plan and subscription of one student, as `GET /subscriptions/me`) |
+| GET | `/admin/users/:id/payments` | admin | UserPayments (the completed payments of one student, as `GET /payments`) |
 | POST | `/webhooks/:provider` | public | Webhook (signature verified; 404 unknown provider, 401 bad signature) |
 
 ## Renewal reminders
