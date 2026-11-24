@@ -621,3 +621,48 @@ func TestCheckoutKeepsRegularPrice(t *testing.T) {
 	require.NotNil(t, saved.RegularMillimes)
 	assert.EqualValues(t, 50000, *saved.RegularMillimes)
 }
+
+// The event carries what the receipt says, so the email about it needs no second lookup.
+func TestPaymentCompletedEventCarriesTheReceipt(t *testing.T) {
+	no := int64(123)
+	done := time.Date(2026, 11, 23, 10, 0, 0, 0, time.UTC)
+	end := done.AddDate(0, 0, 30)
+	pending := &db.Payment{ID: payID, UserID: userID, PlanID: planA, Provider: "flouci", Status: "pending", AmountMillimes: 30000}
+	plans := &mocks.PlanRepository{GetByIDFn: func(context.Context, string) (*db.Plan, error) {
+		return &db.Plan{ID: planA, Name: "Mensuel", DurationDays: 30}, nil
+	}}
+
+	t.Run("with the completed payment", func(t *testing.T) {
+		pays := &mocks.PaymentRepository{GetFn: func(_ context.Context, uid, id string) (*db.Payment, error) {
+			assert.Equal(t, userID, uid)
+			assert.Equal(t, payID, id)
+			c := *pending
+			c.Status, c.CompletedAt, c.ReceiptNo, c.PeriodStart, c.PeriodEnd = "completed", &done, &no, &done, &end
+			return &c, nil
+		}}
+		svc := newSubSvc(nil, plans, &mocks.PromoRepository{}, pays, nil)
+		svc.publish(context.Background(), pending, true)
+
+		assert.Equal(t, []string{core.EventPaymentCompleted, core.EventSubscriptionCreated}, eventsOf(svc))
+		payload := svc.events.(*mocks.Publisher).Payloads[0].(map[string]any)
+		assert.Equal(t, userID, payload["user_id"])
+		assert.EqualValues(t, 30000, payload["amount_millimes"])
+		assert.Equal(t, "2026-000123", payload["receipt_no"])
+		assert.Equal(t, "Mensuel", payload["plan_name"])
+		assert.Equal(t, 30, payload["duration_days"])
+		assert.Equal(t, "2026-11-23T10:00:00Z", payload["period_start"])
+		assert.Equal(t, "2026-12-23T10:00:00Z", payload["period_end"])
+	})
+	t.Run("the event still goes when the payment cannot be read again", func(t *testing.T) {
+		pays := &mocks.PaymentRepository{GetFn: func(context.Context, string, string) (*db.Payment, error) {
+			return nil, errors.New("database down")
+		}}
+		svc := newSubSvc(nil, plans, &mocks.PromoRepository{}, pays, nil)
+		svc.publish(context.Background(), pending, false)
+
+		assert.Equal(t, []string{core.EventPaymentCompleted}, eventsOf(svc))
+		payload := svc.events.(*mocks.Publisher).Payloads[0].(map[string]any)
+		assert.Equal(t, payID, payload["payment_id"])
+		assert.NotContains(t, payload, "receipt_no")
+	})
+}

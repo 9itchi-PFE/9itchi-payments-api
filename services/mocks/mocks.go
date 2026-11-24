@@ -278,13 +278,15 @@ func (Transactor) WithTx(ctx context.Context, fn func(ctx context.Context) error
 	return fn(ctx)
 }
 
-// Publisher records the published event names.
+// Publisher records the published event names and their payloads.
 type Publisher struct {
-	Events []string
+	Events   []string
+	Payloads []any
 }
 
-func (p *Publisher) Publish(_ context.Context, event string, _ any) error {
+func (p *Publisher) Publish(_ context.Context, event string, payload any) error {
 	p.Events = append(p.Events, event)
+	p.Payloads = append(p.Payloads, payload)
 	return nil
 }
 
