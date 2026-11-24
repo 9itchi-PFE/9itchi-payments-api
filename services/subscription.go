@@ -119,6 +119,10 @@ func (s *subscriptionService) Checkout(ctx context.Context, userID string, req a
 	}
 	pay := &db.Payment{UserID: userID, PlanID: plan.ID, PromoCodeID: promoID, Provider: checkoutProvider,
 		AmountMillimes: amount, DiscountMillimes: discount}
+	if plan.RegularPrice != nil {
+		regular := millimes(*plan.RegularPrice)
+		pay.RegularMillimes = &regular
+	}
 	if amount == 0 {
 		return s.activateFree(ctx, pay)
 	}
@@ -303,7 +307,7 @@ const maxReceipts = 200
 // paymentResponse adds the plan and the promo code to a payment. A plan or code deleted since is left empty.
 func (s *subscriptionService) paymentResponse(ctx context.Context, pay *db.Payment, plans map[string]*db.Plan) api.PaymentResponse {
 	res := api.PaymentResponse{
-		ID: pay.ID, Status: pay.Status, PlanID: pay.PlanID, AmountMillimes: pay.AmountMillimes, DiscountMillimes: pay.DiscountMillimes,
+		ID: pay.ID, Status: pay.Status, PlanID: pay.PlanID, AmountMillimes: pay.AmountMillimes, DiscountMillimes: pay.DiscountMillimes, RegularMillimes: pay.RegularMillimes,
 		Provider: pay.Provider, PeriodStart: pay.PeriodStart, PeriodEnd: pay.PeriodEnd, CompletedAt: pay.CompletedAt, CreatedAt: pay.CreatedAt,
 	}
 	if pay.ProviderRef != nil {

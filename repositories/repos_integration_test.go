@@ -360,6 +360,14 @@ func TestPaymentRepository(t *testing.T) {
 
 	p, err := repo.Create(ctx, newPayment())
 	require.NoError(t, err)
+	assert.Nil(t, p.RegularMillimes)
+	regular := int64(50000)
+	withRegular := newPayment()
+	withRegular.RegularMillimes = &regular
+	kept, err := repo.Create(ctx, withRegular)
+	require.NoError(t, err)
+	require.NotNil(t, kept.RegularMillimes)
+	assert.EqualValues(t, 50000, *kept.RegularMillimes)
 	assert.Equal(t, "pending", p.Status)
 	assert.Nil(t, p.ProviderRef)
 	assert.EqualValues(t, 40000, p.AmountMillimes)
