@@ -87,8 +87,8 @@ func (f *flouciProvider) CreateCheckout(ctx context.Context, req CheckoutRequest
 	}
 	payload := map[string]any{
 		"amount":                req.AmountMillimes,
-		"success_link":          f.frontendURL + "/pricing?payment=success",
-		"fail_link":             f.frontendURL + "/pricing?payment=failed",
+		"success_link":          f.frontendURL + ReturnPath(req.PaymentID, "success"),
+		"fail_link":             f.frontendURL + ReturnPath(req.PaymentID, "failed"),
 		"developer_tracking_id": req.PaymentID,
 		"accept_card":           true,
 	}

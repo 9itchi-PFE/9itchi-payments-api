@@ -31,3 +31,29 @@ type MySubscriptionResponse struct {
 	Plan         PlanResponse          `json:"plan"`
 	IsFree       bool                  `json:"is_free"`
 }
+
+// PaymentResponse is one payment of the user: its state after the return from the gateway, and its receipt.
+// Amounts are integer millimes (1/1000 TND): amount is what was paid, discount what the promo code took off.
+type PaymentResponse struct {
+	ID     string `json:"id"`
+	Status string `json:"status"`
+	// ReceiptNo is "<year>-<6 digits>", empty until the payment is completed.
+	ReceiptNo        string     `json:"receipt_no"`
+	PlanID           string     `json:"plan_id"`
+	PlanName         string     `json:"plan_name"`
+	DurationDays     int        `json:"duration_days"`
+	AmountMillimes   int64      `json:"amount_millimes"`
+	DiscountMillimes int64      `json:"discount_millimes"`
+	PromoCode        string     `json:"promo_code"`
+	Provider         string     `json:"provider"`
+	ProviderRef      string     `json:"provider_ref"`
+	PeriodStart      *time.Time `json:"period_start"`
+	PeriodEnd        *time.Time `json:"period_end"`
+	CompletedAt      *time.Time `json:"completed_at"`
+	CreatedAt        time.Time  `json:"created_at"`
+}
+
+// PaymentListResponse wraps the user's completed payments, newest first.
+type PaymentListResponse struct {
+	Items []PaymentResponse `json:"items"`
+}

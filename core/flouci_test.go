@@ -51,7 +51,8 @@ func TestFlouciCreateCheckout(t *testing.T) {
 	assert.Equal(t, "Bearer pub:priv", auth)
 	assert.EqualValues(t, 40000, got["amount"])
 	assert.Equal(t, "pay-1", got["developer_tracking_id"])
-	assert.Equal(t, "https://app.example.com/pricing?payment=success", got["success_link"])
+	assert.Equal(t, "https://app.example.com/settings/billing?payment=success&id=pay-1", got["success_link"])
+	assert.Equal(t, "https://app.example.com/settings/billing?payment=failed&id=pay-1", got["fail_link"])
 	assert.Equal(t, "https://api.example.com/webhooks/flouci", got["webhook"])
 }
 

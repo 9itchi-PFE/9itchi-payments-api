@@ -2,13 +2,14 @@ package repositories
 
 import (
 	"context"
+	"time"
 
 	"9itchi-payments-api/models/db"
 
 	"github.com/jackc/pgx/v5"
 )
 
-const paymentColumns = `id, user_id, plan_id, promo_code_id, provider, provider_ref, status, amount_millimes, discount_millimes, completed_at, created_at, updated_at`
+const paymentColumns = `id, user_id, plan_id, promo_code_id, provider, provider_ref, status, amount_millimes, discount_millimes, completed_at, receipt_no, period_start, period_end, created_at, updated_at`
 
 // PaymentRepository is the only layer that touches PostgreSQL for payment data.
 type PaymentRepository interface {
@@ -21,6 +22,12 @@ type PaymentRepository interface {
 	MarkCompleted(ctx context.Context, id string) (applied bool, err error)
 	// MarkFailed flips a pending payment to failed.
 	MarkFailed(ctx context.Context, id string) error
+	// SetPeriod stores the days a payment paid for.
+	SetPeriod(ctx context.Context, id string, start, end time.Time) error
+	// Get returns one payment of userID (ErrNotFound otherwise).
+	Get(ctx context.Context, userID, id string) (*db.Payment, error)
+	// ListCompletedByUser returns the user's completed payments, newest first.
+	ListCompletedByUser(ctx context.Context, userID string, limit int) ([]db.Payment, error)
 }
 
 type paymentRepository struct {
@@ -75,7 +82,7 @@ func (r *paymentRepository) MarkCompleted(ctx context.Context, id string) (bool,
 	ctx, cancel := QueryTimeout(ctx)
 	defer cancel()
 	tag, err := r.store.Conn(ctx).Exec(ctx,
-		`UPDATE payments SET status = 'completed', completed_at = now(), updated_at = now()
+		`UPDATE payments SET status = 'completed', completed_at = now(), updated_at = now(), receipt_no = nextval('payment_receipt_seq')
 		 WHERE id = $1 AND status = 'pending'`, id)
 	if err != nil {
 		return false, MapError(err)
@@ -89,4 +96,36 @@ func (r *paymentRepository) MarkFailed(ctx context.Context, id string) error {
 	_, err := r.store.Conn(ctx).Exec(ctx,
 		`UPDATE payments SET status = 'failed', updated_at = now() WHERE id = $1 AND status = 'pending'`, id)
 	return MapError(err)
+}
+
+func (r *paymentRepository) SetPeriod(ctx context.Context, id string, start, end time.Time) error {
+	ctx, cancel := QueryTimeout(ctx)
+	defer cancel()
+	_, err := r.store.Conn(ctx).Exec(ctx,
+		`UPDATE payments SET period_start = $2, period_end = $3, updated_at = now() WHERE id = $1`, id, start, end)
+	return MapError(err)
+}
+
+func (r *paymentRepository) Get(ctx context.Context, userID, id string) (*db.Payment, error) {
+	ctx, cancel := QueryTimeout(ctx)
+	defer cancel()
+	rows, err := r.store.Conn(ctx).Query(ctx, `SELECT `+paymentColumns+` FROM payments WHERE id = $1 AND user_id = $2`, id, userID)
+	if err != nil {
+		return nil, MapError(err)
+	}
+	p, err := pgx.CollectOneRow(rows, pgx.RowToAddrOfStructByName[db.Payment])
+	return p, MapError(err)
+}
+
+func (r *paymentRepository) ListCompletedByUser(ctx context.Context, userID string, limit int) ([]db.Payment, error) {
+	ctx, cancel := QueryTimeout(ctx)
+	defer cancel()
+	rows, err := r.store.Conn(ctx).Query(ctx,
+		`SELECT `+paymentColumns+` FROM payments WHERE user_id = $1 AND status = 'completed'
+		 ORDER BY completed_at DESC, id DESC LIMIT $2`, userID, limit)
+	if err != nil {
+		return nil, MapError(err)
+	}
+	out, err := pgx.CollectRows(rows, pgx.RowToStructByName[db.Payment])
+	return out, MapError(err)
 }

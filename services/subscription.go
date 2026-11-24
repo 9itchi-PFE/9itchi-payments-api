@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"errors"
+	"fmt"
 	"math"
 	"net/http"
 	"time"
@@ -21,6 +22,7 @@ const (
 	// freeProvider labels fully discounted payments (0 TND), which never reach a gateway.
 	freeProvider     = "free"
 	paymentCompleted = "completed"
+	paymentPending   = "pending"
 )
 
 var errPromoExhausted = errors.New("promo code usage limit reached")
@@ -33,6 +35,11 @@ type SubscriptionService interface {
 	MySubscription(ctx context.Context, userID string) (*api.MySubscriptionResponse, *models.ApiError)
 	// POST /subscriptions/cancel: cancel the active paid subscription now (Free fallback applies)
 	CancelSubscription(ctx context.Context, userID string) (*api.MessageResponse, *models.ApiError)
+	// GET /payments: the user's completed payments (receipts), newest first
+	ListPayments(ctx context.Context, userID string) (*api.PaymentListResponse, *models.ApiError)
+	// POST /payments/:id/verify: where a payment stands; a pending one is re-checked with the gateway and
+	// completed when it is paid, so the return page does not depend on the webhook
+	VerifyPayment(ctx context.Context, userID, id string) (*api.PaymentResponse, *models.ApiError)
 	// POST /webhooks/:provider: payment provider callback (signature verified, payment re-checked with the provider)
 	Webhook(ctx context.Context, provider string, payload []byte, signature string) (*api.MessageResponse, *models.ApiError)
 }
@@ -196,18 +203,24 @@ func (s *subscriptionService) complete(ctx context.Context, pay *db.Payment) (ap
 			return err
 		}
 		if cur != nil && cur.PlanID == pay.PlanID {
-			return s.repo.Extend(ctx, cur.ID, cur.EndsAt.AddDate(0, 0, plan.DurationDays))
+			// More days of the same plan: the paid period starts where the current one ends.
+			end := cur.EndsAt.AddDate(0, 0, plan.DurationDays)
+			if err := s.repo.Extend(ctx, cur.ID, end); err != nil {
+				return err
+			}
+			return s.payments.SetPeriod(ctx, pay.ID, cur.EndsAt, end)
 		}
 		if err := s.repo.ExpireActive(ctx, pay.UserID); err != nil {
 			return err
 		}
 		now := s.now()
+		end := now.AddDate(0, 0, plan.DurationDays)
 		if _, err := s.repo.Create(ctx, &db.Subscription{UserID: pay.UserID, PlanID: pay.PlanID, PromoCodeID: pay.PromoCodeID,
-			Amount: float64(pay.AmountMillimes) / 1000, StartsAt: now, EndsAt: now.AddDate(0, 0, plan.DurationDays)}); err != nil {
+			Amount: float64(pay.AmountMillimes) / 1000, StartsAt: now, EndsAt: end}); err != nil {
 			return err
 		}
 		subCreated = true
-		return nil
+		return s.payments.SetPeriod(ctx, pay.ID, now, end)
 	})
 	return applied, subCreated, err
 }
@@ -261,6 +274,91 @@ func (s *subscriptionService) CancelSubscription(ctx context.Context, userID str
 		return nil, repoError(err, notFound)
 	}
 	return &api.MessageResponse{Message: "subscription cancelled"}, nil
+}
+
+// maxReceipts bounds GET /payments (one payment a month: years of history).
+const maxReceipts = 200
+
+// paymentResponse adds the plan and the promo code to a payment. A plan or code deleted since is left empty.
+func (s *subscriptionService) paymentResponse(ctx context.Context, pay *db.Payment, plans map[string]*db.Plan) api.PaymentResponse {
+	res := api.PaymentResponse{
+		ID: pay.ID, Status: pay.Status, PlanID: pay.PlanID, AmountMillimes: pay.AmountMillimes, DiscountMillimes: pay.DiscountMillimes,
+		Provider: pay.Provider, PeriodStart: pay.PeriodStart, PeriodEnd: pay.PeriodEnd, CompletedAt: pay.CompletedAt, CreatedAt: pay.CreatedAt,
+	}
+	if pay.ProviderRef != nil {
+		res.ProviderRef = *pay.ProviderRef
+	}
+	if pay.ReceiptNo != nil && pay.CompletedAt != nil {
+		res.ReceiptNo = fmt.Sprintf("%d-%06d", pay.CompletedAt.UTC().Year(), *pay.ReceiptNo)
+	}
+	plan, seen := plans[pay.PlanID]
+	if !seen {
+		if p, err := s.plans.GetByID(ctx, pay.PlanID); err == nil {
+			plan = p
+		}
+		plans[pay.PlanID] = plan
+	}
+	if plan != nil {
+		res.PlanName, res.DurationDays = plan.Name, plan.DurationDays
+	}
+	if pay.PromoCodeID != nil {
+		if promo, err := s.promos.GetByID(ctx, *pay.PromoCodeID); err == nil && promo != nil {
+			res.PromoCode = promo.Code
+		}
+	}
+	return res
+}
+
+func (s *subscriptionService) ListPayments(ctx context.Context, userID string) (*api.PaymentListResponse, *models.ApiError) {
+	if !isUUID(userID) {
+		return nil, badRequest("invalid user id")
+	}
+	pays, err := s.payments.ListCompletedByUser(ctx, userID, maxReceipts)
+	if err != nil {
+		return nil, repoError(err, "payment not found")
+	}
+	out := &api.PaymentListResponse{Items: make([]api.PaymentResponse, 0, len(pays))}
+	plans := map[string]*db.Plan{}
+	for i := range pays {
+		out.Items = append(out.Items, s.paymentResponse(ctx, &pays[i], plans))
+	}
+	return out, nil
+}
+
+func (s *subscriptionService) VerifyPayment(ctx context.Context, userID, id string) (*api.PaymentResponse, *models.ApiError) {
+	if !isUUID(userID) {
+		return nil, badRequest("invalid user id")
+	}
+	if !isUUID(id) {
+		return nil, badRequest("invalid payment id")
+	}
+	pay, err := s.payments.Get(ctx, userID, id)
+	if err != nil {
+		return nil, repoError(err, "payment not found")
+	}
+	if pay.Status == paymentPending && pay.ProviderRef != nil {
+		// The gateway is asked, never the browser: a pending payment only completes when it is really paid.
+		// When the gateway cannot be reached the payment simply stays pending and the client asks again.
+		if newProvider, ok := s.providers[pay.Provider]; ok {
+			paid, verr := newProvider().VerifyPayment(ctx, *pay.ProviderRef)
+			if verr != nil {
+				utils.Logger.Logger.Warnw("verify payment", "payment_id", pay.ID, "error", verr)
+			} else if paid {
+				applied, subCreated, cerr := s.complete(ctx, pay)
+				if cerr != nil {
+					return nil, repoError(cerr, "payment not found")
+				}
+				if applied {
+					s.publish(ctx, pay, subCreated)
+				}
+				if pay, err = s.payments.Get(ctx, userID, id); err != nil {
+					return nil, repoError(err, "payment not found")
+				}
+			}
+		}
+	}
+	res := s.paymentResponse(ctx, pay, map[string]*db.Plan{})
+	return &res, nil
 }
 
 func (s *subscriptionService) Webhook(ctx context.Context, provider string, payload []byte, signature string) (*api.MessageResponse, *models.ApiError) {
