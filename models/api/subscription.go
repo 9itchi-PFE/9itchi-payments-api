@@ -66,3 +66,11 @@ type PaymentResponse struct {
 type PaymentListResponse struct {
 	Items []PaymentResponse `json:"items"`
 }
+
+// RenewalRemindersResponse counts the reminders raised by one call: before the end of a period, after a lapse, and
+// those that could not be raised (they are tried again at the next call).
+type RenewalRemindersResponse struct {
+	Due    int `json:"due"`
+	Lapsed int `json:"lapsed"`
+	Failed int `json:"failed"`
+}

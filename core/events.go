@@ -17,6 +17,8 @@ const (
 	EventJobsMatched         = "jobs.matched"
 	EventSubscriptionCreated = "subscription.created"
 	EventPaymentCompleted    = "payment.completed"
+	// EventSubscriptionRenewalDue: a renewing subscription ends soon (stage "due") or ended without a renewal ("lapsed").
+	EventSubscriptionRenewalDue = "subscription.renewal_due"
 )
 
 // Publisher sends domain events. Swap LogPublisher for a RabbitMQ implementation without touching services.

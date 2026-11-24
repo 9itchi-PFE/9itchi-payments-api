@@ -128,6 +128,8 @@ type SubscriptionRepository struct {
 	ExpireActiveFn    func(ctx context.Context, userID string) error
 	SetRenewalFn      func(ctx context.Context, userID string, renews bool) (*db.Subscription, error)
 	LastEndedFn       func(ctx context.Context, userID string) (*db.Subscription, error)
+	ClaimRemindersFn  func(ctx context.Context, stage string, window time.Duration, limit int) ([]db.RenewalReminder, error)
+	ReleaseReminderFn func(ctx context.Context, subscriptionID, stage string) error
 }
 
 func (m *SubscriptionRepository) GetActiveByUser(ctx context.Context, userID string) (*db.Subscription, error) {
@@ -282,9 +284,16 @@ func (Transactor) WithTx(ctx context.Context, fn func(ctx context.Context) error
 type Publisher struct {
 	Events   []string
 	Payloads []any
+	// Fail, when set, decides which publish fails, like a broker that is down.
+	Fail func(event string, payload any) error
 }
 
 func (p *Publisher) Publish(_ context.Context, event string, payload any) error {
+	if p.Fail != nil {
+		if err := p.Fail(event, payload); err != nil {
+			return err
+		}
+	}
 	p.Events = append(p.Events, event)
 	p.Payloads = append(p.Payloads, payload)
 	return nil
@@ -307,4 +316,18 @@ func (m *IssuerRepository) Update(ctx context.Context, userID string, i *db.Rece
 		return i, nil
 	}
 	return m.UpdateFn(ctx, userID, i)
+}
+
+func (m *SubscriptionRepository) ClaimReminders(ctx context.Context, stage string, window time.Duration, limit int) ([]db.RenewalReminder, error) {
+	if m.ClaimRemindersFn == nil {
+		return nil, nil
+	}
+	return m.ClaimRemindersFn(ctx, stage, window, limit)
+}
+
+func (m *SubscriptionRepository) ReleaseReminder(ctx context.Context, subscriptionID, stage string) error {
+	if m.ReleaseReminderFn == nil {
+		return nil
+	}
+	return m.ReleaseReminderFn(ctx, subscriptionID, stage)
 }

@@ -112,3 +112,15 @@ func ResumeSubscription(svc services.SubscriptionService) gin.HandlerFunc {
 		c.JSON(http.StatusOK, result)
 	}
 }
+
+// SendRenewalReminders: POST /internal/subscriptions/renewal-reminders (internal) raise the renewal reminders that are due.
+func SendRenewalReminders(svc services.SubscriptionService) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		result, apiErr := svc.SendRenewalReminders(c.Request.Context())
+		if apiErr != nil {
+			models.FormatError(c, apiErr)
+			return
+		}
+		c.JSON(http.StatusOK, result)
+	}
+}

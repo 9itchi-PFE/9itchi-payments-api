@@ -88,6 +88,9 @@ func (m *mockSubSvc) CancelSubscription(context.Context, string) (*api.MySubscri
 func (m *mockSubSvc) ResumeSubscription(context.Context, string) (*api.MySubscriptionResponse, *models.ApiError) {
 	return &api.MySubscriptionResponse{Subscription: &api.SubscriptionResponse{ID: "s", Renews: true}}, nil
 }
+func (m *mockSubSvc) SendRenewalReminders(context.Context) (*api.RenewalRemindersResponse, *models.ApiError) {
+	return &api.RenewalRemindersResponse{Due: 2, Lapsed: 1}, nil
+}
 func (m *mockSubSvc) Webhook(_ context.Context, provider string, body []byte, signature string) (*api.MessageResponse, *models.ApiError) {
 	return m.webhook(provider, body, signature)
 }
@@ -317,4 +320,10 @@ func TestReceiptIssuerHandlers(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestSendRenewalRemindersHandler(t *testing.T) {
+	w := do(http.MethodPost, "/internal/subscriptions/renewal-reminders", "/internal/subscriptions/renewal-reminders", "", SendRenewalReminders(&mockSubSvc{}))
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.JSONEq(t, `{"due":2,"lapsed":1,"failed":0}`, w.Body.String())
 }
