@@ -43,6 +43,12 @@ The legal information printed on receipts (`legal_name`, `address`, `tax_id`, `v
 | PUT | `/admin/receipt-issuer` | admin | UpdateReceiptIssuer (full replacement) |
 | POST | `/webhooks/:provider` | public | Webhook (signature verified; 404 unknown provider, 401 bad signature) |
 
+## Events (RabbitMQ)
+
+Optional. With `RABBITMQ_URL` set, `payment.completed` and, for a first period, `subscription.created` (`user_id`, `plan_id`, `payment_id`, `amount_millimes`) are published to the topic exchange `9itchi.events` (routing key = event name) as persistent JSON messages, each confirmed by the broker and carrying a message id consumers deduplicate on. Without the variable the event name is only logged.
+
+A publish failure is logged and never fails the request. A broker that cannot be reached is left alone for 15 s, so it costs one short wait and not one per request; events raised meanwhile are lost (there is no outbox). Broker tests: `RABBITMQ_TEST_URL=amqp://guest:guest@localhost:5672/ go test -tags integration ./core/` (skipped without the variable).
+
 ## Run
 
 ```
