@@ -39,6 +39,15 @@ func TestPlanRepository(t *testing.T) {
 		"ai_drafts_per_month": 0, "ai_rewrites_per_month": 0, "ai_matches_per_month": 0}, free.Quotas,
 		"without a subscription: 3 applications with the imported CV, nothing else")
 
+	assert.Equal(t, "Découverte", free.Details["fr"].Label)
+	assert.Equal(t, "To start your PFE search", free.Details["en"].Tagline)
+	assert.Equal(t, "اكتشاف", free.Details["ar"].Label)
+	for _, l := range []string{"fr", "en", "ar"} {
+		assert.Len(t, free.Details[l].Features, 3, l)
+		assert.NotEmpty(t, free.Details[l].Tagline, l)
+	}
+	assert.Equal(t, "3 applications with your imported CV", free.Details["en"].Features[1])
+
 	pro, err := repo.Create(ctx, &db.Plan{Name: "Pro", Price: 9.99, DurationDays: 30, Quotas: map[string]int{"resumes": 10}, Active: true})
 	require.NoError(t, err)
 	assert.Len(t, pro.ID, 36)
@@ -70,6 +79,17 @@ func TestPlanRepository(t *testing.T) {
 	low := 35.0
 	_, err = repo.Update(ctx, pro.ID, &db.Plan{Name: "Pro", Price: 35, RegularPrice: &low, DurationDays: 30, Quotas: map[string]int{}, Active: true})
 	assert.Error(t, err, "CHECK regular_price > price")
+
+	// Details survive a create/update/read round trip; none stored comes back as an empty (non-nil) map.
+	assert.NotNil(t, pro.Details)
+	assert.Empty(t, pro.Details)
+	withDetails, err := repo.Update(ctx, pro.ID, &db.Plan{Name: "Pro", Price: 35, DurationDays: 30, Quotas: map[string]int{}, Active: true,
+		Details: db.PlanDetails{"fr": {Label: "Pro", Tagline: "Tout", Features: []string{"a", "b"}}}})
+	require.NoError(t, err)
+	assert.Equal(t, db.PlanDetails{"fr": {Label: "Pro", Tagline: "Tout", Features: []string{"a", "b"}}}, withDetails.Details)
+	read, err := repo.GetByID(ctx, pro.ID)
+	require.NoError(t, err)
+	assert.Equal(t, withDetails.Details, read.Details)
 
 	off, err := repo.Deactivate(ctx, pro.ID)
 	require.NoError(t, err)
