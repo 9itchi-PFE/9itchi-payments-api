@@ -67,11 +67,16 @@ func priceAt(p *db.Plan, now time.Time, running []db.Sale) *db.Plan {
 	over := launchOver(p, now)
 	out := *p
 	out.Sale = nil
+	out.LaunchPrice = nil
+	if !over && p.RegularPrice != nil && p.Price > 0 {
+		launch := p.Price
+		out.LaunchPrice = &launch
+	}
 	if over {
 		out.Price, out.RegularPrice, out.LaunchEndsOn = *p.RegularPrice, nil, nil
 	}
 	unchanged := func() *db.Plan {
-		if !over && p.Sale == nil {
+		if !over && p.Sale == nil && out.LaunchPrice == nil && p.LaunchPrice == nil {
 			return p // nothing to change: the plan as it is stored
 		}
 		return &out

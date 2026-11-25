@@ -19,4 +19,7 @@ type Plan struct {
 	// Sale is the sale the plan is in at the moment it was priced (not a column): Price is then the price of
 	// the sale and RegularPrice the price struck through.
 	Sale *Sale `db:"-" json:"-"`
+	// LaunchPrice is the launch price while it runs (not a column): the price a subscriber keeps, even when a sale
+	// makes the plan cheaper that day. Nil when the plan has none or it is over.
+	LaunchPrice *float64 `db:"-" json:"-"`
 }
