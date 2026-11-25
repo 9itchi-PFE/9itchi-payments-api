@@ -36,6 +36,10 @@ The legal information printed on receipts (`legal_name`, `address`, `tax_id`, `v
 | POST | `/admin/promo-codes` | admin | CreatePromo |
 | PUT | `/admin/promo-codes/:id` | admin | UpdatePromo |
 | DELETE | `/admin/promo-codes/:id` | admin | DeletePromo |
+| GET | `/admin/sales` | admin | ListSales |
+| POST | `/admin/sales` | admin | CreateSale |
+| PUT | `/admin/sales/:id` | admin | UpdateSale |
+| DELETE | `/admin/sales/:id` | admin | DeleteSale |
 | POST | `/subscriptions/checkout` | user | Checkout (plan_id, optional promo_code; returns payment_url, payment_id) |
 | GET | `/subscriptions/me` | user | MySubscription (active plan, else Free) |
 | POST | `/subscriptions/cancel` | user | CancelSubscription (stops the renewal, access until the period ends; 404 if no active paid subscription) |
@@ -63,6 +67,18 @@ The legal information printed on receipts (`legal_name`, `address`, `tax_id`, `v
 | `free_applications` | email-api | when `emails_per_month` is `0`: applications 9itchi still sends, over the whole life of the account, with the file the student imported |
 
 A key that is absent sets no limit. **There is no free offer**: the plan named `Free` is what a student with no subscription gets (migration `0010`): one CV, no download, the diagnosis limited to contact and summary, and five applications with the imported file (migration `0011`). It can be changed like any plan.
+
+## Sales: a reduction without a code, between two days
+
+A sale (`sales`, migration `0012`) has a name students see, a percentage (1 to 90), a first and a last day (both included, counted in Tunis) and, optionally, the plans it applies to (none: every paid plan). The admin writes them at `/admin/sales`; each comes back with its `state` today (`upcoming`, `running`, `over`).
+
+While a sale runs, every price a student is shown or charged is the price of the sale: `GET /plans` returns it in `price`, the usual price in `regular_price`, and `sale: {name, percent, ends_on}`. The checkout charges it and the receipt keeps the usual price beside it. Nothing is stored on the plan: the day after the last day the plan costs what it cost before.
+
+- Two sales the same day: the one that takes the most off wins; they do not add up.
+- On a plan with a launch price the percentage is taken off the launch price, and the regular price stays the one struck through.
+- A promo code typed at the checkout applies after the sale, on the price of the sale.
+- A subscription already paid does not change; a renewal paid during the sale costs the price of the sale.
+- Deleting a running sale ends it at once.
 
 ## A month given by the team
 

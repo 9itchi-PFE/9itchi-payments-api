@@ -16,4 +16,7 @@ type Plan struct {
 	Active       bool           `db:"active" json:"active"`
 	CreatedAt    time.Time      `db:"created_at" json:"created_at"`
 	UpdatedAt    time.Time      `db:"updated_at" json:"updated_at"`
+	// Sale is the sale the plan is in at the moment it was priced (not a column): Price is then the price of
+	// the sale and RegularPrice the price struck through.
+	Sale *Sale `db:"-" json:"-"`
 }

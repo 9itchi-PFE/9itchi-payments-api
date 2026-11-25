@@ -723,3 +723,59 @@ func TestGifts(t *testing.T) {
 	require.NoError(t, <-done)
 	require.NoError(t, <-waited)
 }
+
+func TestSaleRepository(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	repo := NewSaleRepository(store)
+	d := func(m time.Month, day int) time.Time { return time.Date(2027, m, day, 0, 0, 0, 0, time.UTC) }
+	const plan = "44444444-4444-4444-8444-444444444444"
+
+	all, err := repo.Create(ctx, &db.Sale{Name: "Rentrée", Percent: 30, StartsOn: d(2, 1), EndsOn: d(2, 15)})
+	require.NoError(t, err)
+	assert.Empty(t, all.PlanIDs)
+	assert.True(t, all.StartsOn.Equal(d(2, 1)))
+	one, err := repo.Create(ctx, &db.Sale{Name: "Flash", Percent: 50, StartsOn: d(2, 10), EndsOn: d(2, 10), PlanIDs: []string{plan}})
+	require.NoError(t, err)
+	assert.Equal(t, []string{plan}, one.PlanIDs)
+
+	// Both days are part of the sale.
+	for day, want := range map[time.Time][]string{
+		d(1, 31): nil, d(2, 1): {"Rentrée"}, d(2, 10): {"Flash", "Rentrée"}, d(2, 15): {"Rentrée"}, d(2, 16): nil,
+	} {
+		running, err := repo.RunningOn(ctx, day)
+		require.NoError(t, err)
+		var names []string
+		for _, s := range running {
+			names = append(names, s.Name)
+		}
+		assert.Equal(t, want, names, day.Format(time.DateOnly))
+	}
+
+	got, err := repo.GetByID(ctx, one.ID)
+	require.NoError(t, err)
+	assert.Equal(t, 50, got.Percent)
+	up, err := repo.Update(ctx, one.ID, &db.Sale{Name: "Flash", Percent: 40, StartsOn: d(2, 10), EndsOn: d(2, 11), PlanIDs: []string{}})
+	require.NoError(t, err)
+	assert.Equal(t, 40, up.Percent)
+	assert.Empty(t, up.PlanIDs)
+	list, err := repo.List(ctx)
+	require.NoError(t, err)
+	require.Len(t, list, 2)
+	assert.Equal(t, "Rentrée", list[0].Name, "the latest to end first")
+
+	// What the table refuses.
+	_, err = repo.Create(ctx, &db.Sale{Name: "x", Percent: 95, StartsOn: d(2, 1), EndsOn: d(2, 2)})
+	assert.Error(t, err)
+	_, err = repo.Create(ctx, &db.Sale{Name: "x", Percent: 10, StartsOn: d(2, 3), EndsOn: d(2, 2)})
+	assert.Error(t, err)
+	_, err = repo.Create(ctx, &db.Sale{Name: "", Percent: 10, StartsOn: d(2, 1), EndsOn: d(2, 2)})
+	assert.Error(t, err)
+
+	require.NoError(t, repo.Delete(ctx, one.ID))
+	assert.ErrorIs(t, repo.Delete(ctx, one.ID), ErrNotFound)
+	_, err = repo.GetByID(ctx, one.ID)
+	assert.ErrorIs(t, err, ErrNotFound)
+	_, err = repo.Update(ctx, one.ID, &db.Sale{Name: "x", Percent: 10, StartsOn: d(2, 1), EndsOn: d(2, 2)})
+	assert.ErrorIs(t, err, ErrNotFound)
+}

@@ -38,42 +38,108 @@ func launchOver(p *db.Plan, now time.Time) bool {
 	return time.Date(y, m, d, 0, 0, 0, 0, time.UTC).After(time.Date(ey, em, ed, 0, 0, 0, 0, time.UTC))
 }
 
+// today is the day it is in Tunis, as a date at midnight UTC (the way the days of a plan or a sale are stored).
+func today(now time.Time) time.Time {
+	y, m, d := now.In(tunis).Date()
+	return time.Date(y, m, d, 0, 0, 0, 0, time.UTC)
+}
+
+// bestSale is the sale that takes the most off a plan among the ones running, nil when none covers it.
+func bestSale(p *db.Plan, running []db.Sale) *db.Sale {
+	var best *db.Sale
+	for i := range running {
+		if s := &running[i]; s.AppliesTo(p.ID) && (best == nil || s.Percent > best.Percent) {
+			best = s
+		}
+	}
+	return best
+}
+
 // priceAt is a plan as it costs at a moment. Once the launch price is over the plan costs its regular price and
-// has nothing to strike through; before that it is returned as it is, with the day the launch price ends.
-func priceAt(p *db.Plan, now time.Time) *db.Plan {
-	if p == nil || !launchOver(p, now) {
+// has nothing to strike through. A sale running that day then takes its percentage off that price: the plan
+// costs the price of the sale, the usual price is the one struck through (the regular price when the plan has
+// one), and Sale says which sale and until when. The free plan is never in a sale.
+func priceAt(p *db.Plan, now time.Time, running []db.Sale) *db.Plan {
+	if p == nil {
 		return p
 	}
+	over := launchOver(p, now)
 	out := *p
-	out.Price, out.RegularPrice, out.LaunchEndsOn = *p.RegularPrice, nil, nil
+	out.Sale = nil
+	if over {
+		out.Price, out.RegularPrice, out.LaunchEndsOn = *p.RegularPrice, nil, nil
+	}
+	sale := bestSale(&out, running)
+	if sale == nil || out.Price <= 0 {
+		if !over && p.Sale == nil {
+			return p // nothing to change: the plan as it is stored
+		}
+		return &out
+	}
+	shown := *sale
+	// The price moves when the launch price ends too: the sale is announced until whichever comes first.
+	if out.LaunchEndsOn != nil && out.LaunchEndsOn.Before(shown.EndsOn) {
+		shown.EndsOn = *out.LaunchEndsOn
+	}
+	if out.RegularPrice == nil {
+		usual := out.Price
+		out.RegularPrice = &usual
+	}
+	out.Price = float64(millimes(out.Price)*int64(100-sale.Percent)/100) / 1000
+	out.LaunchEndsOn, out.Sale = nil, &shown
 	return &out
 }
 
 // pricedPlans reads plans at today's price. Writes go through unchanged.
 type pricedPlans struct {
 	repositories.PlanRepository
-	now func() time.Time
+	sales repositories.SaleRepository
+	now   func() time.Time
 }
 
-// PricedPlans wraps a plan repository so that every plan read costs what it costs now.
-func PricedPlans(repo repositories.PlanRepository, now func() time.Time) repositories.PlanRepository {
-	return &pricedPlans{PlanRepository: repo, now: now}
+// PricedPlans wraps a plan repository so that every plan read costs what it costs now, sales included.
+func PricedPlans(repo repositories.PlanRepository, sales repositories.SaleRepository, now func() time.Time) repositories.PlanRepository {
+	return &pricedPlans{PlanRepository: repo, sales: sales, now: now}
 }
 
 func (r *pricedPlans) GetByID(ctx context.Context, id string) (*db.Plan, error) {
 	p, err := r.PlanRepository.GetByID(ctx, id)
-	return priceAt(p, r.now()), err
+	if err != nil {
+		return p, err
+	}
+	now := r.now()
+	running, err := r.sales.RunningOn(ctx, today(now))
+	if err != nil {
+		return nil, err
+	}
+	return priceAt(p, now, running), nil
 }
 
 func (r *pricedPlans) GetByName(ctx context.Context, name string) (*db.Plan, error) {
 	p, err := r.PlanRepository.GetByName(ctx, name)
-	return priceAt(p, r.now()), err
+	if err != nil {
+		return p, err
+	}
+	now := r.now()
+	running, err := r.sales.RunningOn(ctx, today(now))
+	if err != nil {
+		return nil, err
+	}
+	return priceAt(p, now, running), nil
 }
 
 func (r *pricedPlans) List(ctx context.Context, onlyActive bool) ([]db.Plan, error) {
 	plans, err := r.PlanRepository.List(ctx, onlyActive)
-	for i := range plans {
-		plans[i] = *priceAt(&plans[i], r.now())
+	if err != nil {
+		return plans, err
 	}
-	return plans, err
+	now := r.now()
+	running, err := r.sales.RunningOn(ctx, today(now))
+	if err != nil {
+		return nil, err
+	}
+	for i := range plans {
+		plans[i] = *priceAt(&plans[i], now, running)
+	}
+	return plans, nil
 }

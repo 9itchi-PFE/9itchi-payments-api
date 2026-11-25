@@ -37,7 +37,9 @@ type PlanResponse struct {
 	Price        float64  `json:"price"`
 	RegularPrice *float64 `json:"regular_price,omitempty"`
 	// LaunchEndsOn is the last day of the launch price (YYYY-MM-DD), while there is one.
-	LaunchEndsOn string         `json:"launch_ends_on,omitempty"`
+	LaunchEndsOn string `json:"launch_ends_on,omitempty"`
+	// Sale is the sale the plan is in today: Price is then the price of the sale, RegularPrice the usual one.
+	Sale         *PlanSale      `json:"sale,omitempty"`
 	DurationDays int            `json:"duration_days"`
 	Quotas       map[string]int `json:"quotas"`
 	Active       bool           `json:"active"`
