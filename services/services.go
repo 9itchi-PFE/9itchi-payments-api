@@ -16,6 +16,7 @@ type Services struct {
 	Promo        PromoService
 	Subscription SubscriptionService
 	Issuer       IssuerService
+	Gift         GiftService
 	Clients      *Clients
 }
 
@@ -29,11 +30,13 @@ func InitServices(config utils.AppConfig, repos *repositories.Repositories) *Ser
 	// Everything that charges or shows a price to a student reads the plans at today's price; the admin service
 	// keeps the plans as they were typed.
 	priced := PricedPlans(repos.Plan, time.Now)
+	events := core.NewPublisher(config.RabbitMQURL)
 	return &Services{
 		Plan:         NewPlanService(repos.Plan, repos.Subscription),
 		Promo:        NewPromoService(repos.Promo, priced),
-		Subscription: NewSubscriptionService(repos.Subscription, priced, repos.Promo, repos.Payment, repos.Store, providers, core.NewPublisher(config.RabbitMQURL)),
+		Subscription: NewSubscriptionService(repos.Subscription, priced, repos.Promo, repos.Payment, repos.Store, providers, events),
 		Issuer:       NewIssuerService(repos.Issuer),
+		Gift:         NewGiftService(repos.Gift, repos.Subscription, priced, repos.Store, events),
 		Clients: &Clients{
 			Account: account.New(config.AccountAPIURL, config.InternalAPIKey),
 		},

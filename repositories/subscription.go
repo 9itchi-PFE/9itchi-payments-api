@@ -17,9 +17,13 @@ type SubscriptionRepository interface {
 	// GetActiveByUser returns the user's active, unexpired subscription (ErrNotFound if none).
 	GetActiveByUser(ctx context.Context, userID string) (*db.Subscription, error)
 	// Create inserts a subscription (status active unless set); ErrConflict if the user already has an active one.
+	// A StoppedAt makes it one that ends without a renewal being asked.
 	Create(ctx context.Context, s *db.Subscription) (*db.Subscription, error)
 	// Extend moves ends_at of a subscription (ErrNotFound if unknown). Paying again also resumes a stopped renewal.
 	Extend(ctx context.Context, id string, endsAt time.Time) error
+	// AddDays moves the end of a subscription by days and returns it (ErrNotFound if unknown). Unlike Extend it
+	// leaves the renewal as the student set it: the days are given, nothing was paid.
+	AddDays(ctx context.Context, id string, days int) (*db.Subscription, error)
 	// ExpireActive marks every active subscription of the user expired (also clears lapsed ones).
 	ExpireActive(ctx context.Context, userID string) error
 	// SetRenewal stops (renews=false) or resumes the renewal of the user's active subscription and returns it
@@ -61,9 +65,9 @@ func (r *subscriptionRepository) Create(ctx context.Context, s *db.Subscription)
 	ctx, cancel := QueryTimeout(ctx)
 	defer cancel()
 	rows, err := r.store.Conn(ctx).Query(ctx,
-		`INSERT INTO subscriptions (user_id, plan_id, promo_code_id, status, amount, starts_at, ends_at)
-		 VALUES ($1, $2, $3, COALESCE(NULLIF($4, ''), 'active'), $5, $6, $7) RETURNING `+subscriptionColumns,
-		s.UserID, s.PlanID, s.PromoCodeID, s.Status, s.Amount, s.StartsAt, s.EndsAt)
+		`INSERT INTO subscriptions (user_id, plan_id, promo_code_id, status, amount, starts_at, ends_at, stopped_at)
+		 VALUES ($1, $2, $3, COALESCE(NULLIF($4, ''), 'active'), $5, $6, $7, $8) RETURNING `+subscriptionColumns,
+		s.UserID, s.PlanID, s.PromoCodeID, s.Status, s.Amount, s.StartsAt, s.EndsAt, s.StoppedAt)
 	if err != nil {
 		return nil, MapError(err)
 	}
@@ -83,6 +87,19 @@ func (r *subscriptionRepository) Extend(ctx context.Context, id string, endsAt t
 		return ErrNotFound
 	}
 	return nil
+}
+
+func (r *subscriptionRepository) AddDays(ctx context.Context, id string, days int) (*db.Subscription, error) {
+	ctx, cancel := QueryTimeout(ctx)
+	defer cancel()
+	rows, err := r.store.Conn(ctx).Query(ctx,
+		`UPDATE subscriptions SET ends_at = ends_at + make_interval(days => $2), updated_at = now()
+		 WHERE id = $1 RETURNING `+subscriptionColumns, id, days)
+	if err != nil {
+		return nil, MapError(err)
+	}
+	s, err := pgx.CollectOneRow(rows, pgx.RowToAddrOfStructByName[db.Subscription])
+	return s, MapError(err)
 }
 
 func (r *subscriptionRepository) ExpireActive(ctx context.Context, userID string) error {

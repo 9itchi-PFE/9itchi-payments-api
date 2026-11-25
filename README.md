@@ -46,7 +46,18 @@ The legal information printed on receipts (`legal_name`, `address`, `tax_id`, `v
 | PUT | `/admin/receipt-issuer` | admin | UpdateReceiptIssuer (full replacement) |
 | GET | `/admin/users/:id/subscription` | admin | UserSubscription (the plan and subscription of one student, as `GET /subscriptions/me`) |
 | GET | `/admin/users/:id/payments` | admin | UserPayments (the completed payments of one student, as `GET /payments`) |
+| GET | `/admin/users/:id/gifts` | admin | ListGifts (the months the team gave one student, newest first) |
+| POST | `/admin/users/:id/gifts` | admin | GiveMonth (30 days for free; 409 within a minute of the last one, or when no paid plan is on sale) |
 | POST | `/webhooks/:provider` | public | Webhook (signature verified; 404 unknown provider, 401 bad signature) |
+
+## A month given by the team
+
+`POST /admin/users/:id/gifts` gives the student 30 days, with no body: the admin is read from the token and kept with the gift (`subscription_gifts`).
+
+- **A paid subscription is running**: it ends 30 days later, on the same plan. Its renewal stays as the student left it (a stopped one stays stopped), and the reminders follow the new end.
+- **None is running**: 30 days of a paid plan start now. The plan is the one the student had last when it is still on sale, else the cheapest paid plan on sale. This subscription is stopped from the start: the student did not buy it, so no renewal is asked and no reminder is sent when it ends. `POST /subscriptions/resume` lets them keep it.
+
+A gift is not a payment: no receipt, no amount, nothing in `GET /payments`, and no `payment.completed` (the revenue figures do not move). It raises `subscription.gifted` with `user_id`, `gift_id`, `plan_id`, `plan_name`, `days` and `ends_at`. A second gift to the same student within a minute is refused with 409, so a double click or two admins at once give one month. The call does not check that the user exists: it is made from the file of a student.
 
 ## Renewal reminders
 
