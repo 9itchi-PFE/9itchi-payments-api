@@ -59,9 +59,10 @@ The legal information printed on receipts (`legal_name`, `address`, `tax_id`, `v
 | `resumes` | resume-api | how many CVs |
 | `cv_downloads` | resume-api | downloads of a CV per period of the subscription; `0` allows none |
 | `ats_contact`, `ats_summary`, `ats_experience`, `ats_education`, `ats_skills`, `ats_layout`, `ats_file` | resume-api | `0` hides that group of the CV diagnosis |
-| `emails_per_month` | email-api | applications sent by 9itchi |
+| `emails_per_month` | email-api | applications sent by 9itchi each month, with the CV built in 9itchi; `0` allows none |
+| `free_applications` | email-api | when `emails_per_month` is `0`: applications 9itchi still sends, over the whole life of the account, with the file the student imported |
 
-A key that is absent sets no limit. **There is no free offer**: the plan named `Free` is what a student with no subscription gets (migration `0010`): one CV, no download, and the diagnosis limited to contact and summary. It can be changed like any plan.
+A key that is absent sets no limit. **There is no free offer**: the plan named `Free` is what a student with no subscription gets (migration `0010`): one CV, no download, the diagnosis limited to contact and summary, and five applications with the imported file (migration `0011`). It can be changed like any plan.
 
 ## A month given by the team
 
