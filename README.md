@@ -64,14 +64,15 @@ The legal information printed on receipts (`legal_name`, `address`, `tax_id`, `v
 |---|---|---|
 | `resumes` | resume-api | how many CVs |
 | `cv_downloads` | resume-api | downloads of a CV per period of the subscription; `0` allows none |
+| `cv_edit` | resume-api | `0`: the CVs can be imported and read, not edited in 9itchi (Free) |
 | `ats_contact`, `ats_summary`, `ats_experience`, `ats_education`, `ats_skills`, `ats_layout`, `ats_file` | resume-api | `0` hides that group of the CV diagnosis |
 | `emails_per_month` | email-api | applications sent by 9itchi each month, with the CV built in 9itchi; `0` allows none |
 | `free_applications` | email-api | when `emails_per_month` is `0`: applications 9itchi still sends, over the whole life of the account, with the file the student imported |
-| `ai_drafts_per_month` | email-api | letters written by the AI in a calendar month (Free: 1) |
-| `ai_rewrites_per_month` | resume-api | rewrites of a CV line or of the summary by the AI in a calendar month (Free: 1) |
-| `ai_matches_per_month` | email-api | AI analyses of how well the CV fits an offer in a calendar month (Free: 3) |
+| `ai_drafts_per_month` | email-api | letters written by the AI in a calendar month (Free: 0) |
+| `ai_rewrites_per_month` | resume-api | rewrites of a CV line or of the summary by the AI in a calendar month (Free: 0) |
+| `ai_matches_per_month` | email-api | AI analyses of how well the CV fits an offer in a calendar month (Free: 0) |
 
-A key that is absent sets no limit. **There is no free offer**: the plan named `Free` is what a student with no subscription gets (migration `0010`): one CV, no download, the diagnosis limited to contact and summary, and five applications with the imported file (migration `0011`). It can be changed like any plan.
+A key that is absent sets no limit. **There is no free offer**: the plan named `Free` is what a student with no subscription gets (migration `0015`, decided on 25 November): browse the offers, import one CV and send three applications with the imported file, as it is. No diagnosis, no AI, no download, and the CV is not edited in 9itchi. It can be changed like any plan, in the admin.
 
 ## Sales: a reduction without a code, between two days
 
