@@ -10,6 +10,8 @@ Config (all optional): `FLOUCI_BASE_URL` (default `https://developers.flouci.com
 
 The migrations seed a `Free` plan (price 0, 36500 days). Its quotas follow the product decision: `emails_per_month` 0 (no sending through 9itchi), `resumes` 1 (one CV version) and `cv_downloads` 1 (one free download, with the 9itchi logo). Paid plans are created by the admin (prices in TND). It is the fallback for users with no active subscription and cannot be renamed or deactivated.
 
+Every other plan is a paid plan: its `price` must be above 0 (a free plan could never be bought, checkout refuses it) and its name cannot be `Free` in any case. Names are unique. `DELETE /admin/plans/:id` switches a plan off: it leaves `GET /plans` and checkout refuses it, so its subscribers keep their access until the end of the period they paid but cannot renew on it. `PUT /admin/plans/:id` with `active: true` switches it on again.
+
 After paying, Flouci sends the browser back to `FRONTEND_URL/settings/billing?payment=success|failed&id=<payment_id>`. The query string is never trusted: the page calls `POST /payments/:id/verify`, which asks Flouci whether a pending payment is paid and completes it exactly like the webhook does (same transaction, replays are no-ops). The return page therefore works even when the webhook is late or cannot reach a local machine.
 
 A completed payment gets a receipt number (`receipt_no`, shown as `<year>-<6 digits>`) and the period it paid for (`period_start`, `period_end`; when it extends a running subscription the period starts where the current one ends). `GET /payments` returns them with the plan name, the promo code and the amounts in millimes.

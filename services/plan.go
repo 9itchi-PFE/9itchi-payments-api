@@ -85,9 +85,24 @@ func validatePlanFields(name string, price float64, regular *float64, duration i
 	return nil
 }
 
+// validatePaidPlan holds every plan but Free to what a paid plan is: it costs something (a free one could never be
+// bought, checkout refuses it) and it is not called Free in any case, the name the fallback plan is found by.
+func validatePaidPlan(name string, price float64) *models.ApiError {
+	if strings.EqualFold(name, FreePlanName) {
+		return badRequest("the name Free is kept for the plan without a subscription")
+	}
+	if price <= 0 {
+		return badRequest("a plan other than Free must cost more than 0")
+	}
+	return nil
+}
+
 func (s *planService) CreatePlan(ctx context.Context, _ string, req api.CreatePlanRequest) (*api.PlanResponse, *models.ApiError) {
 	name := strings.TrimSpace(req.Name)
 	if apiErr := validatePlanFields(name, req.Price, req.RegularPrice, req.DurationDays, req.Quotas); apiErr != nil {
+		return nil, apiErr
+	}
+	if apiErr := validatePaidPlan(name, req.Price); apiErr != nil {
 		return nil, apiErr
 	}
 	ends, apiErr := launchEnd(req.LaunchEndsOn, req.RegularPrice)
@@ -129,6 +144,11 @@ func (s *planService) UpdatePlan(ctx context.Context, _ string, id string, req a
 	// The Free plan is the fallback for users without a subscription: it must stay named Free and active.
 	if current.Name == FreePlanName && (name != FreePlanName || !active) {
 		return nil, badRequest("the Free plan cannot be renamed or deactivated")
+	}
+	if current.Name != FreePlanName {
+		if apiErr := validatePaidPlan(name, req.Price); apiErr != nil {
+			return nil, apiErr
+		}
 	}
 	p, err := s.repo.Update(ctx, id, &db.Plan{Name: name, Price: req.Price, RegularPrice: req.RegularPrice, LaunchEndsOn: ends, DurationDays: req.DurationDays, Quotas: req.Quotas, Active: active})
 	if err != nil {
