@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
@@ -290,4 +291,85 @@ func TestPeriodStart(t *testing.T) {
 	assert.Equal(t, began, *short, "never before the subscription itself")
 	odd := periodStart(&db.Subscription{StartsAt: began, EndsAt: day(90)}, &db.Plan{}, day(40))
 	assert.Equal(t, began, *odd)
+}
+
+func TestPlanDetails(t *testing.T) {
+	text := func(label string, features ...string) db.PlanDetails {
+		return db.PlanDetails{"fr": {Label: label, Tagline: "t", Features: features}}
+	}
+	createWith := func(d *db.PlanDetails) (*db.Plan, *models.ApiError) {
+		var saved *db.Plan
+		repo := &mocks.PlanRepository{CreateFn: func(_ context.Context, p *db.Plan) (*db.Plan, error) { saved = p; return p, nil }}
+		_, apiErr := NewPlanService(repo, repo, nil).CreatePlan(context.Background(), "admin",
+			api.CreatePlanRequest{Name: "Pro", Price: 10, DurationDays: 30, Quotas: map[string]int{}, Details: d})
+		return saved, apiErr
+	}
+	bad := map[string]db.PlanDetails{
+		"unknown language":  {"de": {Label: "x"}},
+		"too many features": text("x", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11"),
+		"label too long":    text(strings.Repeat("é", 41)),
+		"tagline too long":  {"en": {Tagline: strings.Repeat("a", 121)}},
+		"empty feature":     text("x", "ok", "  "),
+		"feature too long":  text("x", strings.Repeat("a", 141)),
+	}
+	for name, d := range bad {
+		t.Run("create refuses "+name, func(t *testing.T) {
+			_, apiErr := createWith(&d)
+			require.NotNil(t, apiErr)
+			assert.Equal(t, http.StatusBadRequest, apiErr.Code)
+		})
+	}
+	t.Run("create stores the text trimmed", func(t *testing.T) {
+		d := db.PlanDetails{"ar": {Label: " اكتشاف ", Tagline: " t ", Features: []string{" a ", "b"}}}
+		saved, apiErr := createWith(&d)
+		require.Nil(t, apiErr)
+		assert.Equal(t, db.PlanDetails{"ar": {Label: "اكتشاف", Tagline: "t", Features: []string{"a", "b"}}}, saved.Details)
+	})
+	t.Run("create without details stores an empty object", func(t *testing.T) {
+		saved, apiErr := createWith(nil)
+		require.Nil(t, apiErr)
+		assert.NotNil(t, saved.Details)
+		assert.Empty(t, saved.Details)
+	})
+	t.Run("limits count characters, not bytes", func(t *testing.T) {
+		d := text(strings.Repeat("é", 40), strings.Repeat("é", 140))
+		_, apiErr := createWith(&d)
+		require.Nil(t, apiErr)
+	})
+
+	current := db.PlanDetails{"en": {Label: "Keep"}}
+	update := func(d *db.PlanDetails) (*db.Plan, *models.ApiError) {
+		var saved *db.Plan
+		repo := &mocks.PlanRepository{
+			GetByIDFn: func(context.Context, string) (*db.Plan, error) {
+				return &db.Plan{ID: planA, Name: "Pro", Active: true, Details: current}, nil
+			},
+			UpdateFn: func(_ context.Context, _ string, p *db.Plan) (*db.Plan, error) { saved = p; return p, nil },
+		}
+		_, apiErr := NewPlanService(repo, repo, &mocks.SubscriptionRepository{}).UpdatePlan(context.Background(), "a", planA,
+			api.UpdatePlanRequest{Name: "Pro", Price: 10, DurationDays: 30, Quotas: map[string]int{}, Details: d})
+		return saved, apiErr
+	}
+	t.Run("update without details keeps the current ones", func(t *testing.T) {
+		saved, apiErr := update(nil)
+		require.Nil(t, apiErr)
+		assert.Equal(t, current, saved.Details)
+	})
+	t.Run("update replaces them, an empty object clears them", func(t *testing.T) {
+		d := text(" New ")
+		saved, apiErr := update(&d)
+		require.Nil(t, apiErr)
+		assert.Equal(t, "New", saved.Details["fr"].Label)
+		assert.NotContains(t, saved.Details, "en")
+		empty := db.PlanDetails{}
+		saved, apiErr = update(&empty)
+		require.Nil(t, apiErr)
+		assert.Empty(t, saved.Details)
+	})
+	t.Run("update refuses a bad language", func(t *testing.T) {
+		d := db.PlanDetails{"de": {}}
+		_, apiErr := update(&d)
+		require.NotNil(t, apiErr)
+		assert.Equal(t, http.StatusBadRequest, apiErr.Code)
+	})
 }

@@ -1,6 +1,10 @@
 package api
 
-import "time"
+import (
+	"time"
+
+	"9itchi-payments-api/models/db"
+)
 
 // CreatePlanRequest is the validated body of CreatePlan.
 type CreatePlanRequest struct {
@@ -13,7 +17,10 @@ type CreatePlanRequest struct {
 	LaunchEndsOn string         `json:"launch_ends_on" binding:"omitempty,datetime=2006-01-02"`
 	DurationDays int            `json:"duration_days" binding:"required,gt=0"`
 	Quotas       map[string]int `json:"quotas" binding:"required"`
-	Active       *bool          `json:"active"`
+	// Details is the text students read, by language (fr, en, ar). Leave it out: none on create, the current one
+	// kept on update.
+	Details *db.PlanDetails `json:"details"`
+	Active  *bool           `json:"active"`
 }
 
 // UpdatePlanRequest is the validated body of UpdatePlan (full replacement).
@@ -27,7 +34,10 @@ type UpdatePlanRequest struct {
 	LaunchEndsOn string         `json:"launch_ends_on" binding:"omitempty,datetime=2006-01-02"`
 	DurationDays int            `json:"duration_days" binding:"required,gt=0"`
 	Quotas       map[string]int `json:"quotas" binding:"required"`
-	Active       *bool          `json:"active"`
+	// Details is the text students read, by language (fr, en, ar). Leave it out: none on create, the current one
+	// kept on update.
+	Details *db.PlanDetails `json:"details"`
+	Active  *bool           `json:"active"`
 }
 
 // PlanResponse is a plan as returned to clients.
@@ -42,9 +52,11 @@ type PlanResponse struct {
 	Sale         *PlanSale      `json:"sale,omitempty"`
 	DurationDays int            `json:"duration_days"`
 	Quotas       map[string]int `json:"quotas"`
-	Active       bool           `json:"active"`
-	CreatedAt    time.Time      `json:"created_at"`
-	UpdatedAt    time.Time      `json:"updated_at"`
+	// Details is the text students read, by language; {} when none.
+	Details   db.PlanDetails `json:"details"`
+	Active    bool           `json:"active"`
+	CreatedAt time.Time      `json:"created_at"`
+	UpdatedAt time.Time      `json:"updated_at"`
 }
 
 // PlanListResponse wraps a list of plans.

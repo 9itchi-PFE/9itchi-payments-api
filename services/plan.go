@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"9itchi-payments-api/models"
 	"9itchi-payments-api/models/api"
@@ -111,11 +112,17 @@ func (s *planService) CreatePlan(ctx context.Context, _ string, req api.CreatePl
 	if apiErr != nil {
 		return nil, apiErr
 	}
+	details := db.PlanDetails{}
+	if req.Details != nil {
+		if details, apiErr = cleanDetails(*req.Details); apiErr != nil {
+			return nil, apiErr
+		}
+	}
 	active := true
 	if req.Active != nil {
 		active = *req.Active
 	}
-	p, err := s.repo.Create(ctx, &db.Plan{Name: name, Price: req.Price, RegularPrice: req.RegularPrice, LaunchEndsOn: ends, DurationDays: req.DurationDays, Quotas: req.Quotas, Active: active})
+	p, err := s.repo.Create(ctx, &db.Plan{Name: name, Price: req.Price, RegularPrice: req.RegularPrice, LaunchEndsOn: ends, DurationDays: req.DurationDays, Quotas: req.Quotas, Details: details, Active: active})
 	if err != nil {
 		return nil, repoError(err, "plan not found")
 	}
@@ -135,9 +142,18 @@ func (s *planService) UpdatePlan(ctx context.Context, _ string, id string, req a
 	if apiErr != nil {
 		return nil, apiErr
 	}
+	var details db.PlanDetails
+	if req.Details != nil {
+		if details, apiErr = cleanDetails(*req.Details); apiErr != nil {
+			return nil, apiErr
+		}
+	}
 	current, err := s.repo.GetByID(ctx, id)
 	if err != nil {
 		return nil, repoError(err, "plan not found")
+	}
+	if req.Details == nil {
+		details = current.Details // left out: the text stays as it is
 	}
 	active := current.Active
 	if req.Active != nil {
@@ -163,7 +179,7 @@ func (s *planService) UpdatePlan(ctx context.Context, _ string, id string, req a
 			return nil, &models.ApiError{Code: http.StatusConflict, Error: errors.New("the length of a plan with active subscribers cannot change")}
 		}
 	}
-	p, err := s.repo.Update(ctx, id, &db.Plan{Name: name, Price: req.Price, RegularPrice: req.RegularPrice, LaunchEndsOn: ends, DurationDays: req.DurationDays, Quotas: req.Quotas, Active: active})
+	p, err := s.repo.Update(ctx, id, &db.Plan{Name: name, Price: req.Price, RegularPrice: req.RegularPrice, LaunchEndsOn: ends, DurationDays: req.DurationDays, Quotas: req.Quotas, Details: details, Active: active})
 	if err != nil {
 		return nil, repoError(err, "plan not found")
 	}
@@ -223,4 +239,45 @@ func periodStart(sub *db.Subscription, plan *db.Plan, now time.Time) *time.Time 
 		}
 	}
 	return &start
+}
+
+// Languages a plan can be described in, and the limits of a description.
+var planLocales = map[string]bool{"fr": true, "en": true, "ar": true}
+
+const (
+	maxPlanLabel    = 40
+	maxPlanTagline  = 120
+	maxPlanFeatures = 10
+	maxPlanFeature  = 140
+)
+
+// cleanDetails checks the text students read about a plan and returns it trimmed. A fault is refused, nothing is
+// dropped silently: an unknown language, a text too long, too many features or an empty one is a 400.
+func cleanDetails(in db.PlanDetails) (db.PlanDetails, *models.ApiError) {
+	out := make(db.PlanDetails, len(in))
+	for locale, text := range in {
+		if !planLocales[locale] {
+			return nil, badRequest("details: language must be fr, en or ar")
+		}
+		label, tagline := strings.TrimSpace(text.Label), strings.TrimSpace(text.Tagline)
+		if utf8.RuneCountInString(label) > maxPlanLabel {
+			return nil, badRequest("details: label is too long (40 characters at most)")
+		}
+		if utf8.RuneCountInString(tagline) > maxPlanTagline {
+			return nil, badRequest("details: tagline is too long (120 characters at most)")
+		}
+		if len(text.Features) > maxPlanFeatures {
+			return nil, badRequest("details: 10 features at most")
+		}
+		var features []string
+		for _, f := range text.Features {
+			f = strings.TrimSpace(f)
+			if f == "" || utf8.RuneCountInString(f) > maxPlanFeature {
+				return nil, badRequest("details: each feature must be 1 to 140 characters")
+			}
+			features = append(features, f)
+		}
+		out[locale] = db.PlanText{Label: label, Tagline: tagline, Features: features}
+	}
+	return out, nil
 }

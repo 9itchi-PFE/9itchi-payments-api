@@ -12,6 +12,10 @@ func PlanToResponse(p *db.Plan) api.PlanResponse {
 	if quotas == nil {
 		quotas = map[string]int{}
 	}
+	details := p.Details
+	if details == nil {
+		details = db.PlanDetails{}
+	}
 	ends := ""
 	if p.LaunchEndsOn != nil {
 		ends = p.LaunchEndsOn.Format(time.DateOnly)
@@ -22,7 +26,7 @@ func PlanToResponse(p *db.Plan) api.PlanResponse {
 	}
 	return api.PlanResponse{
 		ID: p.ID, Name: p.Name, Price: p.Price, RegularPrice: p.RegularPrice, LaunchEndsOn: ends, Sale: sale, DurationDays: p.DurationDays,
-		Quotas: quotas, Active: p.Active, CreatedAt: p.CreatedAt, UpdatedAt: p.UpdatedAt,
+		Quotas: quotas, Details: details, Active: p.Active, CreatedAt: p.CreatedAt, UpdatedAt: p.UpdatedAt,
 	}
 }
 
