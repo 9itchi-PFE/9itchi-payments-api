@@ -8,7 +8,7 @@ Payments go through the `flouci` provider (`core/flouci.go`, registered in `core
 
 Config (all optional): `FLOUCI_BASE_URL` (default `https://developers.flouci.com`), `FLOUCI_PUBLIC_KEY`, `FLOUCI_PRIVATE_KEY`, `FLOUCI_WEBHOOK_SECRET`, `FLOUCI_WEBHOOK_URL` (public URL of `/webhooks/flouci`, skipped when local), `FRONTEND_URL` (default `http://localhost:3000`).
 
-The migrations seed a `Free` plan (price 0, 36500 days). Its quotas follow the product decision: `emails_per_month` 0 (no sending through 9itchi), `resumes` 1 (one CV version) and `cv_downloads` 1 (one free download, with the 9itchi logo). Paid plans are created by the admin (prices in TND). It is the fallback for users with no active subscription and cannot be renamed or deactivated.
+The migrations seed a `Free` plan (price 0, 36500 days). Its quotas follow the product decision of 25 Nov. (`0015_free_plan_minimal.sql`): 3 `free_applications` with the imported CV, no CV editing (`cv_edit` 0), no download, no AI and no CV check. Paid plans are created by the admin (prices in TND). It is the fallback for users with no active subscription and cannot be renamed or deactivated.
 
 Every other plan is a paid plan: its `price` must be above 0 (a free plan could never be bought, checkout refuses it) and its name cannot be `Free` in any case. Names are unique. `DELETE /admin/plans/:id` switches a plan off: it leaves `GET /plans` and checkout refuses it, so its subscribers keep their access until the end of the period they paid but cannot renew on it. `PUT /admin/plans/:id` with `active: true` switches it on again.
 

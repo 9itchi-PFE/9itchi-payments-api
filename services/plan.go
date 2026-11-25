@@ -2,6 +2,8 @@ package services
 
 import (
 	"context"
+	"errors"
+	"net/http"
 	"strings"
 	"time"
 
@@ -148,6 +150,17 @@ func (s *planService) UpdatePlan(ctx context.Context, _ string, id string, req a
 	if current.Name != FreePlanName {
 		if apiErr := validatePaidPlan(name, req.Price); apiErr != nil {
 			return nil, apiErr
+		}
+	}
+	// Quota periods of running subscriptions are counted with the plan's length: changing it under them would move
+	// their resets. The length stays while anyone holds the plan; the team creates a new plan instead.
+	if req.DurationDays != current.DurationDays {
+		held, err := s.subs.HasActiveOnPlan(ctx, id)
+		if err != nil {
+			return nil, repoError(err, "plan not found")
+		}
+		if held {
+			return nil, &models.ApiError{Code: http.StatusConflict, Error: errors.New("the length of a plan with active subscribers cannot change")}
 		}
 	}
 	p, err := s.repo.Update(ctx, id, &db.Plan{Name: name, Price: req.Price, RegularPrice: req.RegularPrice, LaunchEndsOn: ends, DurationDays: req.DurationDays, Quotas: req.Quotas, Active: active})
