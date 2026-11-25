@@ -14,8 +14,10 @@ type Payment struct {
 	AmountMillimes   int64   `db:"amount_millimes" json:"amount_millimes"`
 	DiscountMillimes int64   `db:"discount_millimes" json:"discount_millimes"`
 	// RegularMillimes is the plan's regular price when the payment was opened (nil: the plan had none).
-	RegularMillimes *int64     `db:"regular_millimes" json:"regular_millimes"`
-	CompletedAt     *time.Time `db:"completed_at" json:"completed_at"`
+	RegularMillimes *int64 `db:"regular_millimes" json:"regular_millimes"`
+	// SaleName is the sale the payment was opened in ("" when none): the receipt names it.
+	SaleName    string     `db:"sale_name" json:"sale_name"`
+	CompletedAt *time.Time `db:"completed_at" json:"completed_at"`
 	// ReceiptNo is set when the payment completes; PeriodStart and PeriodEnd are the days it paid for.
 	ReceiptNo   *int64     `db:"receipt_no" json:"receipt_no"`
 	PeriodStart *time.Time `db:"period_start" json:"period_start"`

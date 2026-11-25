@@ -369,3 +369,74 @@ func (m *GiftRepository) ListByUser(ctx context.Context, userID string, limit in
 	}
 	return m.ListFn(ctx, userID, limit)
 }
+
+// SaleRepository is a mock of repositories.SaleRepository: Sales is the table, Err fails every call.
+type SaleRepository struct {
+	Sales []db.Sale
+	Err   error
+}
+
+func (m *SaleRepository) List(context.Context) ([]db.Sale, error) {
+	return append([]db.Sale(nil), m.Sales...), m.Err
+}
+
+func (m *SaleRepository) GetByID(_ context.Context, id string) (*db.Sale, error) {
+	for i := range m.Sales {
+		if m.Sales[i].ID == id {
+			out := m.Sales[i]
+			return &out, m.Err
+		}
+	}
+	if m.Err != nil {
+		return nil, m.Err
+	}
+	return nil, repositories.ErrNotFound
+}
+
+func (m *SaleRepository) RunningOn(_ context.Context, day time.Time) ([]db.Sale, error) {
+	var out []db.Sale
+	for _, s := range m.Sales {
+		if !day.Before(s.StartsOn) && !day.After(s.EndsOn) {
+			out = append(out, s)
+		}
+	}
+	return out, m.Err
+}
+
+func (m *SaleRepository) Create(_ context.Context, s *db.Sale) (*db.Sale, error) {
+	if m.Err != nil {
+		return nil, m.Err
+	}
+	out := *s
+	out.ID = "sale-" + string(rune('a'+len(m.Sales)))
+	m.Sales = append(m.Sales, out)
+	return &out, nil
+}
+
+func (m *SaleRepository) Update(_ context.Context, id string, s *db.Sale) (*db.Sale, error) {
+	if m.Err != nil {
+		return nil, m.Err
+	}
+	for i := range m.Sales {
+		if m.Sales[i].ID == id {
+			out := *s
+			out.ID = id
+			m.Sales[i] = out
+			return &out, nil
+		}
+	}
+	return nil, repositories.ErrNotFound
+}
+
+func (m *SaleRepository) Delete(_ context.Context, id string) error {
+	if m.Err != nil {
+		return m.Err
+	}
+	for i := range m.Sales {
+		if m.Sales[i].ID == id {
+			m.Sales = append(m.Sales[:i], m.Sales[i+1:]...)
+			return nil
+		}
+	}
+	return repositories.ErrNotFound
+}

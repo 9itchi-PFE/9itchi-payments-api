@@ -30,12 +30,13 @@ type PlanService interface {
 
 type planService struct {
 	repo repositories.PlanRepository
-	subs repositories.SubscriptionRepository
-	now  func() time.Time
+	// priced reads the same plans at today's price, sales included: what students are shown.
+	priced repositories.PlanRepository
+	subs   repositories.SubscriptionRepository
 }
 
-func NewPlanService(repo repositories.PlanRepository, subs repositories.SubscriptionRepository) PlanService {
-	return &planService{repo: repo, subs: subs, now: time.Now}
+func NewPlanService(repo, priced repositories.PlanRepository, subs repositories.SubscriptionRepository) PlanService {
+	return &planService{repo: repo, priced: priced, subs: subs}
 }
 
 func (s *planService) ListPlans(ctx context.Context) (*api.PlanListResponse, *models.ApiError) {
@@ -47,18 +48,18 @@ func (s *planService) ListAllPlans(ctx context.Context) (*api.PlanListResponse, 
 }
 
 func (s *planService) list(ctx context.Context, onlyActive bool) (*api.PlanListResponse, *models.ApiError) {
-	plans, err := s.repo.List(ctx, onlyActive)
+	// Students see what a plan costs today; the admin sees what was typed, the end of the launch included.
+	repo := s.repo
+	if onlyActive {
+		repo = s.priced
+	}
+	plans, err := repo.List(ctx, onlyActive)
 	if err != nil {
 		return nil, repoError(err, "plan not found")
 	}
 	items := make([]api.PlanResponse, 0, len(plans))
 	for i := range plans {
-		p := &plans[i]
-		if onlyActive {
-			// Students see what a plan costs today; the admin sees what was typed, the end of the launch included.
-			p = priceAt(p, s.now())
-		}
-		items = append(items, mapping.PlanToResponse(p))
+		items = append(items, mapping.PlanToResponse(&plans[i]))
 	}
 	return &api.PlanListResponse{Items: items}, nil
 }

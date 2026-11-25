@@ -24,11 +24,11 @@ func TestPriceAt(t *testing.T) {
 	p := launchPlan()
 	// 22:59 UTC on the last day is still the last day in Tunis; one minute later it is February there.
 	lastMinute := time.Date(2027, 1, 31, 22, 59, 0, 0, time.UTC)
-	got := priceAt(p, lastMinute)
+	got := priceAt(p, lastMinute, nil)
 	assert.Same(t, p, got, "during the launch the plan is returned as it is")
 	assert.Equal(t, 35.0, got.Price)
 
-	got = priceAt(p, lastMinute.Add(time.Minute))
+	got = priceAt(p, lastMinute.Add(time.Minute), nil)
 	assert.Equal(t, 50.0, got.Price, "the day after, the plan costs its regular price")
 	assert.Nil(t, got.RegularPrice, "and nothing is struck through")
 	assert.Nil(t, got.LaunchEndsOn)
@@ -37,11 +37,11 @@ func TestPriceAt(t *testing.T) {
 	// No end, or no regular price to go back to: the price stays.
 	noEnd := launchPlan()
 	noEnd.LaunchEndsOn = nil
-	assert.Equal(t, 35.0, priceAt(noEnd, lastMinute.AddDate(5, 0, 0)).Price)
+	assert.Equal(t, 35.0, priceAt(noEnd, lastMinute.AddDate(5, 0, 0), nil).Price)
 	noRegular := launchPlan()
 	noRegular.RegularPrice = nil
-	assert.Equal(t, 35.0, priceAt(noRegular, lastMinute.AddDate(5, 0, 0)).Price)
-	assert.Nil(t, priceAt(nil, lastMinute))
+	assert.Equal(t, 35.0, priceAt(noRegular, lastMinute.AddDate(5, 0, 0), nil).Price)
+	assert.Nil(t, priceAt(nil, lastMinute, nil))
 }
 
 func TestPricedPlansReadAtTodaysPrice(t *testing.T) {
@@ -53,7 +53,7 @@ func TestPricedPlansReadAtTodaysPrice(t *testing.T) {
 			return []db.Plan{*launchPlan(), {Name: FreePlanName}}, nil
 		},
 	}
-	priced := PricedPlans(raw, func() time.Time { return now })
+	priced := PricedPlans(raw, &mocks.SaleRepository{}, func() time.Time { return now })
 	p, err := priced.GetByID(context.Background(), "p1")
 	require.NoError(t, err)
 	assert.Equal(t, 50.0, p.Price)
@@ -81,7 +81,8 @@ func TestLaunchEndOnPlans(t *testing.T) {
 		},
 		ListFn: func(context.Context, bool) ([]db.Plan, error) { return []db.Plan{*launchPlan()}, nil },
 	}
-	svc := NewPlanService(repo, &mocks.SubscriptionRepository{}).(*planService)
+	now := time.Date(2027, 1, 15, 9, 0, 0, 0, time.UTC)
+	svc := NewPlanService(repo, PricedPlans(repo, &mocks.SaleRepository{}, func() time.Time { return now }), &mocks.SubscriptionRepository{}).(*planService)
 	regular := 50.0
 	req := api.UpdatePlanRequest{Name: "Abonnement étudiant", Price: 35, RegularPrice: &regular, LaunchEndsOn: "2027-03-31", DurationDays: 30, Quotas: map[string]int{}}
 
@@ -109,7 +110,7 @@ func TestLaunchEndOnPlans(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, apiErr.Code)
 
 	// Students see today's price; the admin sees what was typed.
-	svc.now = func() time.Time { return time.Date(2027, 2, 1, 9, 0, 0, 0, time.UTC) }
+	now = time.Date(2027, 2, 1, 9, 0, 0, 0, time.UTC)
 	public, apiErr := svc.ListPlans(context.Background())
 	require.Nil(t, apiErr)
 	assert.Equal(t, 50.0, public.Items[0].Price)
@@ -120,8 +121,108 @@ func TestLaunchEndOnPlans(t *testing.T) {
 	assert.Equal(t, 35.0, admin.Items[0].Price)
 	assert.Equal(t, "2027-01-31", admin.Items[0].LaunchEndsOn)
 
-	svc.now = func() time.Time { return time.Date(2027, 1, 20, 9, 0, 0, 0, time.UTC) }
+	now = time.Date(2027, 1, 20, 9, 0, 0, 0, time.UTC)
 	public, _ = svc.ListPlans(context.Background())
 	assert.Equal(t, 35.0, public.Items[0].Price)
 	assert.Equal(t, "2027-01-31", public.Items[0].LaunchEndsOn, "students can be told until when")
+}
+
+func day(y int, m time.Month, d int) time.Time { return time.Date(y, m, d, 0, 0, 0, 0, time.UTC) }
+
+func TestPriceAtInASale(t *testing.T) {
+	rentree := db.Sale{ID: "s1", Name: "Rentrée", Percent: 30, StartsOn: day(2027, 2, 1), EndsOn: day(2027, 2, 15)}
+	now := time.Date(2027, 2, 10, 9, 0, 0, 0, time.UTC)
+
+	// A plan with one price: the sale price is charged, the usual one is struck through.
+	plain := &db.Plan{ID: "p1", Name: "Mensuel", Price: 50, DurationDays: 30, Active: true}
+	got := priceAt(plain, now, []db.Sale{rentree})
+	assert.Equal(t, 35.0, got.Price)
+	require.NotNil(t, got.RegularPrice)
+	assert.Equal(t, 50.0, *got.RegularPrice)
+	require.NotNil(t, got.Sale)
+	assert.Equal(t, "Rentrée", got.Sale.Name)
+	assert.Equal(t, day(2027, 2, 15), got.Sale.EndsOn)
+	assert.Equal(t, 50.0, plain.Price, "the stored plan is not changed")
+	assert.Nil(t, plain.Sale)
+
+	// No sale running: the plan as it is stored.
+	assert.Same(t, plain, priceAt(plain, now, nil))
+
+	// The best of two sales wins; a sale for other plans does not count.
+	flash := db.Sale{ID: "s2", Name: "Flash", Percent: 40, StartsOn: day(2027, 2, 10), EndsOn: day(2027, 2, 10)}
+	others := db.Sale{ID: "s3", Name: "Autre", Percent: 80, StartsOn: day(2027, 2, 1), EndsOn: day(2027, 2, 28), PlanIDs: []string{"p9"}}
+	got = priceAt(plain, now, []db.Sale{rentree, flash, others})
+	assert.Equal(t, 30.0, got.Price)
+	assert.Equal(t, "Flash", got.Sale.Name)
+
+	// A sale on top of a launch price: taken off the launch price, the regular price stays the one struck
+	// through, and the sale is announced until the launch price ends when that comes first.
+	launch := launchPlan() // 35 instead of 50 until 31 January 2027
+	january := db.Sale{ID: "s4", Name: "Janvier", Percent: 20, StartsOn: day(2027, 1, 20), EndsOn: day(2027, 2, 5)}
+	got = priceAt(launch, time.Date(2027, 1, 25, 9, 0, 0, 0, time.UTC), []db.Sale{january})
+	assert.Equal(t, 28.0, got.Price)
+	assert.Equal(t, 50.0, *got.RegularPrice)
+	assert.Nil(t, got.LaunchEndsOn)
+	assert.Equal(t, day(2027, 1, 31), got.Sale.EndsOn)
+	// After the launch: off the regular price, until the end of the sale.
+	got = priceAt(launch, time.Date(2027, 2, 2, 9, 0, 0, 0, time.UTC), []db.Sale{january})
+	assert.Equal(t, 40.0, got.Price)
+	assert.Equal(t, 50.0, *got.RegularPrice)
+	assert.Equal(t, day(2027, 2, 5), got.Sale.EndsOn)
+
+	// Never below a millime, never the free plan.
+	odd := &db.Plan{ID: "p2", Price: 49.99}
+	assert.Equal(t, 33.493, priceAt(odd, now, []db.Sale{{Percent: 33, StartsOn: day(2027, 2, 1), EndsOn: day(2027, 2, 28)}}).Price)
+	free := &db.Plan{ID: "p0", Name: FreePlanName}
+	assert.Same(t, free, priceAt(free, now, []db.Sale{rentree}))
+}
+
+func TestPricedPlansInASale(t *testing.T) {
+	now := time.Date(2027, 1, 31, 23, 30, 0, 0, time.UTC) // already 1 February in Tunis
+	raw := &mocks.PlanRepository{
+		GetByIDFn: func(context.Context, string) (*db.Plan, error) {
+			return &db.Plan{ID: "p1", Name: "Mensuel", Price: 50, DurationDays: 30, Active: true}, nil
+		},
+		ListFn: func(context.Context, bool) ([]db.Plan, error) {
+			return []db.Plan{{Name: FreePlanName}, {ID: "p1", Name: "Mensuel", Price: 50, Active: true}}, nil
+		},
+	}
+	sales := &mocks.SaleRepository{Sales: []db.Sale{{ID: "s1", Name: "Rentrée", Percent: 30, StartsOn: day(2027, 2, 1), EndsOn: day(2027, 2, 15)}}}
+	priced := PricedPlans(raw, sales, func() time.Time { return now })
+
+	p, err := priced.GetByID(context.Background(), "p1")
+	require.NoError(t, err)
+	assert.Equal(t, 35.0, p.Price, "the sale starts with the day in Tunis")
+	list, err := priced.List(context.Background(), true)
+	require.NoError(t, err)
+	assert.Equal(t, 0.0, list[0].Price)
+	assert.Nil(t, list[0].Sale)
+	assert.Equal(t, 35.0, list[1].Price)
+
+	// What students are shown says which sale and until when; the admin still reads what was typed.
+	svc := NewPlanService(raw, priced, &mocks.SubscriptionRepository{})
+	public, apiErr := svc.ListPlans(context.Background())
+	require.Nil(t, apiErr)
+	require.NotNil(t, public.Items[1].Sale)
+	assert.Equal(t, api.PlanSale{Name: "Rentrée", Percent: 30, EndsOn: "2027-02-15"}, *public.Items[1].Sale)
+	assert.Equal(t, 50.0, *public.Items[1].RegularPrice)
+	admin, apiErr := svc.ListAllPlans(context.Background())
+	require.Nil(t, apiErr)
+	assert.Equal(t, 50.0, admin.Items[1].Price)
+	assert.Nil(t, admin.Items[1].Sale)
+
+	// The day after the last day, and the day before the first.
+	now = time.Date(2027, 2, 15, 23, 0, 0, 0, time.UTC)
+	p, _ = priced.GetByID(context.Background(), "p1")
+	assert.Equal(t, 50.0, p.Price)
+	now = time.Date(2027, 1, 31, 22, 59, 0, 0, time.UTC)
+	p, _ = priced.GetByID(context.Background(), "p1")
+	assert.Equal(t, 50.0, p.Price)
+
+	// A price is never guessed when the sales cannot be read.
+	sales.Err = assert.AnError
+	_, err = priced.GetByID(context.Background(), "p1")
+	assert.Error(t, err)
+	_, err = priced.List(context.Background(), true)
+	assert.Error(t, err)
 }

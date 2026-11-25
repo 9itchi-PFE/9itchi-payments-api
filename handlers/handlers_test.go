@@ -10,6 +10,7 @@ import (
 
 	"9itchi-payments-api/models"
 	"9itchi-payments-api/models/api"
+	"9itchi-payments-api/services"
 
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
@@ -400,4 +401,59 @@ func TestGiftHandlers(t *testing.T) {
 	assert.Contains(t, w.Body.String(), `"items":[{"id":"g1"`)
 	w = do(http.MethodGet, "/admin/users/:id/gifts", "/admin/users/nope/gifts", "", ListGifts(svc))
 	assert.Equal(t, http.StatusBadRequest, w.Code)
+}
+
+type mockSaleSvc struct {
+	services.SaleService
+	created api.SaleRequest
+	deleted string
+	err     *models.ApiError
+}
+
+func (m *mockSaleSvc) ListSales(context.Context) (*api.SaleListResponse, *models.ApiError) {
+	return &api.SaleListResponse{Items: []api.SaleResponse{{ID: "s1", Name: "Rentrée", Percent: 30, State: "running"}}}, m.err
+}
+func (m *mockSaleSvc) CreateSale(_ context.Context, r api.SaleRequest) (*api.SaleResponse, *models.ApiError) {
+	m.created = r
+	return &api.SaleResponse{ID: "s1", Name: r.Name, Percent: r.Percent}, m.err
+}
+func (m *mockSaleSvc) UpdateSale(_ context.Context, id string, r api.SaleRequest) (*api.SaleResponse, *models.ApiError) {
+	return &api.SaleResponse{ID: id, Name: r.Name, Percent: r.Percent}, m.err
+}
+func (m *mockSaleSvc) DeleteSale(_ context.Context, id string) *models.ApiError {
+	m.deleted = id
+	return m.err
+}
+
+func TestSaleHandlers(t *testing.T) {
+	m := &mockSaleSvc{}
+	w := do(http.MethodGet, "/admin/sales", "/admin/sales", "", ListSales(m))
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Contains(t, w.Body.String(), `"state":"running"`)
+
+	body := `{"name":"Rentrée","percent":30,"starts_on":"2027-02-01","ends_on":"2027-02-15"}`
+	w = do(http.MethodPost, "/admin/sales", "/admin/sales", body, CreateSale(m))
+	assert.Equal(t, http.StatusCreated, w.Code)
+	assert.Equal(t, 30, m.created.Percent)
+	w = do(http.MethodPut, "/admin/sales/:id", "/admin/sales/s9", body, UpdateSale(m))
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Contains(t, w.Body.String(), `"id":"s9"`)
+	w = do(http.MethodDelete, "/admin/sales/:id", "/admin/sales/s9", "", DeleteSale(m))
+	assert.Equal(t, http.StatusNoContent, w.Code)
+	assert.Equal(t, "s9", m.deleted)
+
+	// What the binding refuses never reaches the service.
+	for _, bad := range []string{
+		`{"percent":30,"starts_on":"2027-02-01","ends_on":"2027-02-15"}`,
+		`{"name":"x","percent":95,"starts_on":"2027-02-01","ends_on":"2027-02-15"}`,
+		`{"name":"x","percent":30,"starts_on":"01/02/2027","ends_on":"2027-02-15"}`,
+		`{"name":"x","percent":30,"starts_on":"2027-02-01","ends_on":"2027-02-15","plan_ids":["nope"]}`,
+	} {
+		assert.Equal(t, http.StatusBadRequest, do(http.MethodPost, "/admin/sales", "/admin/sales", bad, CreateSale(m)).Code, bad)
+		assert.Equal(t, http.StatusBadRequest, do(http.MethodPut, "/admin/sales/:id", "/admin/sales/s9", bad, UpdateSale(m)).Code, bad)
+	}
+
+	m.err = &models.ApiError{Code: http.StatusNotFound, Error: assert.AnError}
+	assert.Equal(t, http.StatusNotFound, do(http.MethodDelete, "/admin/sales/:id", "/admin/sales/s9", "", DeleteSale(m)).Code)
+	assert.Equal(t, http.StatusNotFound, do(http.MethodGet, "/admin/sales", "/admin/sales", "", ListSales(m)).Code)
 }

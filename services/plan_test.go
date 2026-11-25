@@ -27,7 +27,7 @@ func TestListPlans(t *testing.T) {
 			assert.Equal(t, onlyActive, a)
 			return []db.Plan{{ID: "1", Name: "Pro"}}, nil
 		}}
-		svc := NewPlanService(repo, &mocks.SubscriptionRepository{})
+		svc := NewPlanService(repo, repo, &mocks.SubscriptionRepository{})
 		var res *api.PlanListResponse
 		var apiErr *models.ApiError
 		if onlyActive {
@@ -41,7 +41,7 @@ func TestListPlans(t *testing.T) {
 	}
 	t.Run("error", func(t *testing.T) {
 		repo := &mocks.PlanRepository{ListFn: func(context.Context, bool) ([]db.Plan, error) { return nil, errors.New("x") }}
-		_, apiErr := NewPlanService(repo, nil).ListPlans(context.Background())
+		_, apiErr := NewPlanService(repo, repo, nil).ListPlans(context.Background())
 		require.NotNil(t, apiErr)
 		assert.Equal(t, http.StatusInternalServerError, apiErr.Code)
 	})
@@ -79,7 +79,7 @@ func TestCreatePlan(t *testing.T) {
 				p.ID = "new"
 				return p, nil
 			}}
-			res, apiErr := NewPlanService(repo, nil).CreatePlan(context.Background(), "admin", req)
+			res, apiErr := NewPlanService(repo, repo, nil).CreatePlan(context.Background(), "admin", req)
 			if tc.wantCode != 0 {
 				require.NotNil(t, apiErr)
 				assert.Equal(t, tc.wantCode, apiErr.Code)
@@ -102,24 +102,24 @@ func TestUpdatePlan(t *testing.T) {
 		}
 	}
 	t.Run("ok keeps active when omitted", func(t *testing.T) {
-		res, apiErr := NewPlanService(existing("Pro"), nil).UpdatePlan(context.Background(), "a", planA, req)
+		res, apiErr := NewPlanService(existing("Pro"), existing("Pro"), nil).UpdatePlan(context.Background(), "a", planA, req)
 		require.Nil(t, apiErr)
 		assert.True(t, res.Active)
 		assert.Equal(t, "Pro+", res.Name)
 	})
 	t.Run("free cannot be renamed", func(t *testing.T) {
-		_, apiErr := NewPlanService(existing(FreePlanName), nil).UpdatePlan(context.Background(), "a", planA, req)
+		_, apiErr := NewPlanService(existing(FreePlanName), existing(FreePlanName), nil).UpdatePlan(context.Background(), "a", planA, req)
 		require.NotNil(t, apiErr)
 		assert.Equal(t, http.StatusBadRequest, apiErr.Code)
 	})
 	t.Run("not found", func(t *testing.T) {
 		repo := &mocks.PlanRepository{GetByIDFn: func(context.Context, string) (*db.Plan, error) { return nil, repositories.ErrNotFound }}
-		_, apiErr := NewPlanService(repo, nil).UpdatePlan(context.Background(), "a", planA, req)
+		_, apiErr := NewPlanService(repo, repo, nil).UpdatePlan(context.Background(), "a", planA, req)
 		require.NotNil(t, apiErr)
 		assert.Equal(t, http.StatusNotFound, apiErr.Code)
 	})
 	t.Run("bad id", func(t *testing.T) {
-		_, apiErr := NewPlanService(nil, nil).UpdatePlan(context.Background(), "a", "x", req)
+		_, apiErr := NewPlanService(nil, nil, nil).UpdatePlan(context.Background(), "a", "x", req)
 		require.NotNil(t, apiErr)
 		assert.Equal(t, http.StatusBadRequest, apiErr.Code)
 	})
@@ -131,19 +131,19 @@ func TestDeactivatePlan(t *testing.T) {
 			GetByIDFn:    func(context.Context, string) (*db.Plan, error) { return &db.Plan{ID: planA, Name: "Pro"}, nil },
 			DeactivateFn: func(context.Context, string) (*db.Plan, error) { return &db.Plan{ID: planA, Name: "Pro"}, nil },
 		}
-		res, apiErr := NewPlanService(repo, nil).DeactivatePlan(context.Background(), "a", planA)
+		res, apiErr := NewPlanService(repo, repo, nil).DeactivatePlan(context.Background(), "a", planA)
 		require.Nil(t, apiErr)
 		assert.False(t, res.Active)
 	})
 	t.Run("free refused", func(t *testing.T) {
 		repo := &mocks.PlanRepository{GetByIDFn: func(context.Context, string) (*db.Plan, error) { return freePlan, nil }}
-		_, apiErr := NewPlanService(repo, nil).DeactivatePlan(context.Background(), "a", planA)
+		_, apiErr := NewPlanService(repo, repo, nil).DeactivatePlan(context.Background(), "a", planA)
 		require.NotNil(t, apiErr)
 		assert.Equal(t, http.StatusBadRequest, apiErr.Code)
 	})
 	t.Run("not found", func(t *testing.T) {
 		repo := &mocks.PlanRepository{GetByIDFn: func(context.Context, string) (*db.Plan, error) { return nil, repositories.ErrNotFound }}
-		_, apiErr := NewPlanService(repo, nil).DeactivatePlan(context.Background(), "a", planA)
+		_, apiErr := NewPlanService(repo, repo, nil).DeactivatePlan(context.Background(), "a", planA)
 		require.NotNil(t, apiErr)
 		assert.Equal(t, http.StatusNotFound, apiErr.Code)
 	})
@@ -159,7 +159,7 @@ func TestGetQuotas(t *testing.T) {
 		subs := &mocks.SubscriptionRepository{GetActiveByUserFn: func(context.Context, string) (*db.Subscription, error) {
 			return &db.Subscription{PlanID: planA, EndsAt: time.Now().Add(time.Hour)}, nil
 		}}
-		res, apiErr := NewPlanService(plans, subs).GetQuotas(context.Background(), userID)
+		res, apiErr := NewPlanService(plans, plans, subs).GetQuotas(context.Background(), userID)
 		require.Nil(t, apiErr)
 		assert.Equal(t, map[string]int{"emails_per_month": 100}, res.Quotas)
 		assert.NotNil(t, res.PeriodStart)
@@ -168,7 +168,7 @@ func TestGetQuotas(t *testing.T) {
 		subs := &mocks.SubscriptionRepository{GetActiveByUserFn: func(context.Context, string) (*db.Subscription, error) {
 			return nil, repositories.ErrNotFound
 		}}
-		res, apiErr := NewPlanService(plans, subs).GetQuotas(context.Background(), userID)
+		res, apiErr := NewPlanService(plans, plans, subs).GetQuotas(context.Background(), userID)
 		require.Nil(t, apiErr)
 		assert.Equal(t, FreePlanName, res.PlanName)
 		assert.Equal(t, 1, res.Quotas["resumes"])
@@ -178,12 +178,12 @@ func TestGetQuotas(t *testing.T) {
 		subs := &mocks.SubscriptionRepository{GetActiveByUserFn: func(context.Context, string) (*db.Subscription, error) {
 			return nil, errors.New("db down")
 		}}
-		_, apiErr := NewPlanService(plans, subs).GetQuotas(context.Background(), userID)
+		_, apiErr := NewPlanService(plans, plans, subs).GetQuotas(context.Background(), userID)
 		require.NotNil(t, apiErr)
 		assert.Equal(t, http.StatusInternalServerError, apiErr.Code)
 	})
 	t.Run("bad user id", func(t *testing.T) {
-		_, apiErr := NewPlanService(plans, nil).GetQuotas(context.Background(), "x")
+		_, apiErr := NewPlanService(plans, plans, nil).GetQuotas(context.Background(), "x")
 		require.NotNil(t, apiErr)
 		assert.Equal(t, http.StatusBadRequest, apiErr.Code)
 	})
@@ -201,7 +201,7 @@ func TestPlanRegularPrice(t *testing.T) {
 		},
 		UpdateFn: func(_ context.Context, _ string, p *db.Plan) (*db.Plan, error) { saved = p; return p, nil },
 	}
-	svc := NewPlanService(repo, &mocks.SubscriptionRepository{})
+	svc := NewPlanService(repo, repo, &mocks.SubscriptionRepository{})
 	quotas := map[string]int{"resumes": 10}
 
 	res, apiErr := svc.CreatePlan(context.Background(), userID, api.CreatePlanRequest{Name: "Pro", Price: 35, RegularPrice: floatPtr(50), DurationDays: 30, Quotas: quotas})

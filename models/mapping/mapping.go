@@ -16,9 +16,32 @@ func PlanToResponse(p *db.Plan) api.PlanResponse {
 	if p.LaunchEndsOn != nil {
 		ends = p.LaunchEndsOn.Format(time.DateOnly)
 	}
+	var sale *api.PlanSale
+	if p.Sale != nil {
+		sale = &api.PlanSale{Name: p.Sale.Name, Percent: p.Sale.Percent, EndsOn: p.Sale.EndsOn.Format(time.DateOnly)}
+	}
 	return api.PlanResponse{
-		ID: p.ID, Name: p.Name, Price: p.Price, RegularPrice: p.RegularPrice, LaunchEndsOn: ends, DurationDays: p.DurationDays,
+		ID: p.ID, Name: p.Name, Price: p.Price, RegularPrice: p.RegularPrice, LaunchEndsOn: ends, Sale: sale, DurationDays: p.DurationDays,
 		Quotas: quotas, Active: p.Active, CreatedAt: p.CreatedAt, UpdatedAt: p.UpdatedAt,
+	}
+}
+
+// SaleToResponse writes a sale for the admin, with where it stands on the given day (a date at midnight UTC).
+func SaleToResponse(s *db.Sale, day time.Time) api.SaleResponse {
+	ids := s.PlanIDs
+	if ids == nil {
+		ids = []string{}
+	}
+	state := "running"
+	switch {
+	case day.Before(s.StartsOn):
+		state = "upcoming"
+	case day.After(s.EndsOn):
+		state = "over"
+	}
+	return api.SaleResponse{
+		ID: s.ID, Name: s.Name, Percent: s.Percent, StartsOn: s.StartsOn.Format(time.DateOnly), EndsOn: s.EndsOn.Format(time.DateOnly),
+		PlanIDs: ids, State: state, CreatedAt: s.CreatedAt, UpdatedAt: s.UpdatedAt,
 	}
 }
 
