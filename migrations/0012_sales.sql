@@ -13,6 +13,9 @@ CREATE TABLE sales (
   CHECK (starts_on <= ends_on)
 );
 CREATE INDEX sales_days_idx ON sales (ends_on, starts_on);
+-- The sale a payment was opened in, by its name that day, so a receipt keeps saying why the price was lower.
+ALTER TABLE payments ADD COLUMN sale_name text NOT NULL DEFAULT '';
 
 -- +goose Down
+ALTER TABLE payments DROP COLUMN sale_name;
 DROP TABLE sales;

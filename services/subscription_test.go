@@ -622,6 +622,46 @@ func TestCheckoutKeepsRegularPrice(t *testing.T) {
 	assert.EqualValues(t, 50000, *saved.RegularMillimes)
 }
 
+// During a sale the checkout charges the price of the sale, and the payment keeps the usual price and the name
+// of the sale for the receipt.
+func TestCheckoutInASale(t *testing.T) {
+	raw := &mocks.PlanRepository{GetByIDFn: func(context.Context, string) (*db.Plan, error) {
+		return &db.Plan{ID: planA, Name: "Mensuel", Price: 50, DurationDays: 30, Active: true}, nil
+	}}
+	now := time.Date(2027, 2, 10, 9, 0, 0, 0, time.UTC)
+	sales := &mocks.SaleRepository{Sales: []db.Sale{{ID: "s1", Name: "Rentrée", Percent: 30,
+		StartsOn: time.Date(2027, 2, 1, 0, 0, 0, 0, time.UTC), EndsOn: time.Date(2027, 2, 15, 0, 0, 0, 0, time.UTC)}}}
+	var saved *db.Payment
+	pays := &mocks.PaymentRepository{CreateFn: func(_ context.Context, p *db.Payment) (*db.Payment, error) {
+		saved = p
+		c := *p
+		c.ID = payID
+		return &c, nil
+	}}
+	var charged int64
+	prov := &mocks.PaymentProvider{CreateCheckoutFn: func(_ context.Context, req core.CheckoutRequest) (core.CheckoutResult, error) {
+		charged = req.AmountMillimes
+		return core.CheckoutResult{Ref: "ref-1", URL: "https://pay.example/ref-1"}, nil
+	}}
+	svc := newSubSvc(&mocks.SubscriptionRepository{}, raw, &mocks.PromoRepository{}, pays, prov)
+	svc.plans = PricedPlans(raw, sales, func() time.Time { return now })
+	_, apiErr := svc.Checkout(context.Background(), userID, api.CheckoutRequest{PlanID: planA})
+	require.Nil(t, apiErr)
+	assert.EqualValues(t, 35000, charged)
+	assert.EqualValues(t, 35000, saved.AmountMillimes)
+	require.NotNil(t, saved.RegularMillimes)
+	assert.EqualValues(t, 50000, *saved.RegularMillimes)
+	assert.Equal(t, "Rentrée", saved.SaleName)
+
+	// The day after the sale: the usual price, and nothing about a sale on the payment.
+	now = time.Date(2027, 2, 16, 9, 0, 0, 0, time.UTC)
+	_, apiErr = svc.Checkout(context.Background(), userID, api.CheckoutRequest{PlanID: planA})
+	require.Nil(t, apiErr)
+	assert.EqualValues(t, 50000, charged)
+	assert.Nil(t, saved.RegularMillimes)
+	assert.Empty(t, saved.SaleName)
+}
+
 // The event carries what the receipt says, so the email about it needs no second lookup.
 func TestPaymentCompletedEventCarriesTheReceipt(t *testing.T) {
 	no := int64(123)

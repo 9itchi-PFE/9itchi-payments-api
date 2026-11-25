@@ -52,14 +52,16 @@ type PaymentResponse struct {
 	AmountMillimes   int64  `json:"amount_millimes"`
 	DiscountMillimes int64  `json:"discount_millimes"`
 	// RegularMillimes is the regular price of the plan that day, when it had one: the receipt shows the difference.
-	RegularMillimes *int64     `json:"regular_millimes,omitempty"`
-	PromoCode       string     `json:"promo_code"`
-	Provider        string     `json:"provider"`
-	ProviderRef     string     `json:"provider_ref"`
-	PeriodStart     *time.Time `json:"period_start"`
-	PeriodEnd       *time.Time `json:"period_end"`
-	CompletedAt     *time.Time `json:"completed_at"`
-	CreatedAt       time.Time  `json:"created_at"`
+	RegularMillimes *int64 `json:"regular_millimes,omitempty"`
+	// SaleName is the sale the payment was opened in, when there was one.
+	SaleName    string     `json:"sale_name,omitempty"`
+	PromoCode   string     `json:"promo_code"`
+	Provider    string     `json:"provider"`
+	ProviderRef string     `json:"provider_ref"`
+	PeriodStart *time.Time `json:"period_start"`
+	PeriodEnd   *time.Time `json:"period_end"`
+	CompletedAt *time.Time `json:"completed_at"`
+	CreatedAt   time.Time  `json:"created_at"`
 }
 
 // PaymentListResponse wraps the user's completed payments, newest first.

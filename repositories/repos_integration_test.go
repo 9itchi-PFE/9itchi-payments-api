@@ -772,6 +772,18 @@ func TestSaleRepository(t *testing.T) {
 	_, err = repo.Create(ctx, &db.Sale{Name: "", Percent: 10, StartsOn: d(2, 1), EndsOn: d(2, 2)})
 	assert.Error(t, err)
 
+	// A payment keeps the name of the sale it was opened in.
+	free, err := NewPlanRepository(store).GetByName(ctx, "Free")
+	require.NoError(t, err)
+	pays := NewPaymentRepository(store)
+	const user = "88888888-8888-8888-8888-8888888888aa"
+	pay, err := pays.Create(ctx, &db.Payment{UserID: user, PlanID: free.ID, Provider: "flouci", AmountMillimes: 35000, SaleName: "Rentrée"})
+	require.NoError(t, err)
+	assert.Equal(t, "Rentrée", pay.SaleName)
+	plain, err := pays.Create(ctx, &db.Payment{UserID: user, PlanID: free.ID, Provider: "flouci", AmountMillimes: 50000})
+	require.NoError(t, err)
+	assert.Empty(t, plain.SaleName)
+
 	require.NoError(t, repo.Delete(ctx, one.ID))
 	assert.ErrorIs(t, repo.Delete(ctx, one.ID), ErrNotFound)
 	_, err = repo.GetByID(ctx, one.ID)
