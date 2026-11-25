@@ -14,7 +14,7 @@ Every other plan is a paid plan: its `price` must be above 0 (a free plan could 
 
 After paying, Flouci sends the browser back to `FRONTEND_URL/settings/billing?payment=success|failed&id=<payment_id>`. The query string is never trusted: the page calls `POST /payments/:id/verify`, which asks Flouci whether a pending payment is paid and completes it exactly like the webhook does (same transaction, replays are no-ops). The return page therefore works even when the webhook is late or cannot reach a local machine.
 
-A completed payment gets a receipt number (`receipt_no`, shown as `<year>-<6 digits>`) and the period it paid for (`period_start`, `period_end`; when it extends a running subscription the period starts where the current one ends). `GET /payments` returns them with the plan name, the promo code and the amounts in millimes.
+A completed payment gets a receipt number (`receipt_no`, shown as `<year>-<6 digits>`) and the period it paid for (`period_start`, `period_end`; when it extends a running subscription the period starts where the current one ends). Paying for another plan while one is running (a monthly student taking the yearly plan) starts the new plan at once and adds the unused days of the old one at its end, so no paid day is lost. `GET /payments` returns them with the plan name, the promo code and the amounts in millimes.
 
 A plan can carry a `regular_price`: what it normally costs, shown struck through next to `price`, which stays the amount charged. It must be above `price`. `PUT /admin/plans/:id` replaces the whole plan, so leaving `regular_price` out removes it. A payment keeps the regular price of the day it was opened (`regular_millimes`), so its receipt goes on showing the difference after the plan changes.
 

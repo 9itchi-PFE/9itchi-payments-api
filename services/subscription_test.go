@@ -331,6 +331,36 @@ func TestWebhook(t *testing.T) {
 		assert.Equal(t, end.AddDate(0, 0, 30), extended)
 		assert.Equal(t, []string{core.EventPaymentCompleted}, eventsOf(svc))
 	})
+	t.Run("another plan starts now and keeps the days left of the current one", func(t *testing.T) {
+		left := 12 * 24 * time.Hour
+		var created []*db.Subscription
+		expired := false
+		subs := &mocks.SubscriptionRepository{
+			GetActiveByUserFn: func(context.Context, string) (*db.Subscription, error) {
+				return &db.Subscription{ID: "s1", PlanID: planB, EndsAt: fixedNow.Add(left)}, nil
+			},
+			ExpireActiveFn: func(context.Context, string) error { expired = true; return nil },
+			ExtendFn: func(context.Context, string, time.Time) error {
+				t.Fatal("another plan is not an extension of the current one")
+				return nil
+			},
+			CreateFn: func(_ context.Context, s *db.Subscription) (*db.Subscription, error) {
+				created = append(created, s)
+				return s, nil
+			},
+		}
+		pays := &mocks.PaymentRepository{GetByProviderRefFn: lookup(pending),
+			MarkCompletedFn: func(context.Context, string) (bool, error) { return true, nil }}
+		plans := &mocks.PlanRepository{GetByIDFn: func(context.Context, string) (*db.Plan, error) { return &db.Plan{ID: planA, DurationDays: 365}, nil }}
+		svc := newSubSvc(subs, plans, &mocks.PromoRepository{}, pays, signed(true))
+		_, apiErr := svc.Webhook(ctx, "flouci", []byte("{}"), "good")
+		require.Nil(t, apiErr)
+		assert.True(t, expired)
+		require.Len(t, created, 1)
+		assert.Equal(t, planA, created[0].PlanID)
+		assert.Equal(t, fixedNow, created[0].StartsAt)
+		assert.Equal(t, fixedNow.AddDate(0, 0, 365).Add(left), created[0].EndsAt)
+	})
 	t.Run("replay is a no-op", func(t *testing.T) {
 		done := *pending
 		done.Status = "completed"
