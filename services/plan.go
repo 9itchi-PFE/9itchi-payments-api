@@ -168,18 +168,25 @@ func (s *planService) GetQuotas(ctx context.Context, userID string) (*api.Quotas
 	if quotas == nil {
 		quotas = map[string]int{}
 	}
-	return &api.QuotasResponse{UserID: userID, PlanID: plan.ID, PlanName: plan.Name, Quotas: quotas, PeriodStart: periodStart(sub, plan)}, nil
+	return &api.QuotasResponse{UserID: userID, PlanID: plan.ID, PlanName: plan.Name, Quotas: quotas, PeriodStart: periodStart(sub, plan, time.Now())}, nil
 }
 
-// periodStart is when the period a subscription is in began: one plan duration before its end, and never before
-// the subscription itself (a first period, or days given by the team on top of it). Nil without a subscription.
-func periodStart(sub *db.Subscription, plan *db.Plan) *time.Time {
+// periodStart is when the period a subscription is in began. Periods are counted back from its end, one plan
+// duration at a time, down to the one that holds now; never before the subscription itself. Days the team gave, or
+// a renewal paid ahead, push the end further than one duration away: the period in progress is still the one now
+// falls in. Nil without a subscription.
+func periodStart(sub *db.Subscription, plan *db.Plan, now time.Time) *time.Time {
 	if sub == nil || plan == nil {
 		return nil
 	}
-	start := sub.EndsAt.AddDate(0, 0, -plan.DurationDays)
-	if plan.DurationDays <= 0 || start.Before(sub.StartsAt) {
-		start = sub.StartsAt
+	start := sub.StartsAt
+	if plan.DurationDays > 0 {
+		for at := sub.EndsAt.AddDate(0, 0, -plan.DurationDays); at.After(sub.StartsAt); at = at.AddDate(0, 0, -plan.DurationDays) {
+			if !at.After(now) {
+				start = at
+				break
+			}
+		}
 	}
 	return &start
 }
