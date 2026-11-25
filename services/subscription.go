@@ -231,6 +231,11 @@ func (s *subscriptionService) complete(ctx context.Context, pay *db.Payment) (ap
 		}
 		now := s.now()
 		end := now.AddDate(0, 0, plan.DurationDays)
+		// Another plan (a monthly subscriber taking the yearly one): the new plan starts now, and the days the
+		// student already paid and has not used are added at its end, so that changing plan never loses any.
+		if cur != nil && cur.EndsAt.After(now) {
+			end = end.Add(cur.EndsAt.Sub(now))
+		}
 		if _, err := s.repo.Create(ctx, &db.Subscription{UserID: pay.UserID, PlanID: pay.PlanID, PromoCodeID: pay.PromoCodeID,
 			Amount: float64(pay.AmountMillimes) / 1000, StartsAt: now, EndsAt: end, LaunchMillimes: pay.LaunchMillimes}); err != nil {
 			return err

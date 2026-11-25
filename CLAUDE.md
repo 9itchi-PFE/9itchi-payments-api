@@ -24,6 +24,8 @@ Plans and quotas (single source of truth for subscriptions), promo codes, sales,
 - Env: `RABBITMQ_URL`, `ACCOUNT_API_URL`, `FRONTEND_URL`, `FLOUCI_BASE_URL|PUBLIC_KEY|PRIVATE_KEY|WEBHOOK_SECRET|WEBHOOK_URL`.
 
 ## Domain rules
+- Admin plans: every plan but Free must cost > 0 and cannot be named Free (any case); names unique (409). `DELETE` switches a plan off (gone from `GET /plans`, checkout 404, subscribers keep access to `ends_at`); `PUT active: true` switches it on. `duration_days` cannot change while the plan has active subscribers (409, message contains "length"): quota periods count with it.
+- Plan change (e.g. monthly -> yearly): new plan starts now, unused days of the old one are added at its end. Same plan: extends from current end.
 - Free plan = "no subscription"; `GET /subscriptions/me` falls back to it. Free (since `0015`): `free_applications` 3, `cv_edit` 0, `cv_downloads` 0, AI quotas 0, `ats_*` 0. All editable in admin Plans.
 - Quota keys: `resumes`, `cv_downloads` (per period), `ats_<group>`, `cv_edit`, `ai_{drafts,rewrites,matches}_per_month`, `free_applications` (account lifetime), `emails_per_month`. Missing key = unlimited.
 - Pricing (`services/pricing.go`, Tunis days): launch price until `launch_ends_on`, then `regular_price`. Sale % applies to the regular price, never the launch price, never raises the price, never on Free. No promo code during a sale; best of two sales wins.

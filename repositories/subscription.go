@@ -31,6 +31,8 @@ type SubscriptionRepository interface {
 	SetRenewal(ctx context.Context, userID string, renews bool) (*db.Subscription, error)
 	// LastEnded returns the user's most recent subscription whose period is over (ErrNotFound if none).
 	LastEnded(ctx context.Context, userID string) (*db.Subscription, error)
+	// HasActiveOnPlan says whether any student holds an active, unexpired subscription of the plan.
+	HasActiveOnPlan(ctx context.Context, planID string) (bool, error)
 	// ClaimReminders marks and returns, at most limit at a time, the renewing subscriptions of a paid plan that need
 	// the reminder of a stage and did not get it for their current period. ReminderDue: the period ends within
 	// window. ReminderLapsed: it ended within window and the user has no running subscription. A subscription is
@@ -59,6 +61,15 @@ func (r *subscriptionRepository) GetActiveByUser(ctx context.Context, userID str
 	}
 	s, err := pgx.CollectOneRow(rows, pgx.RowToAddrOfStructByName[db.Subscription])
 	return s, MapError(err)
+}
+
+func (r *subscriptionRepository) HasActiveOnPlan(ctx context.Context, planID string) (bool, error) {
+	ctx, cancel := QueryTimeout(ctx)
+	defer cancel()
+	var found bool
+	err := r.store.Conn(ctx).QueryRow(ctx,
+		`SELECT EXISTS (SELECT 1 FROM subscriptions WHERE plan_id = $1 AND status = 'active' AND ends_at > now())`, planID).Scan(&found)
+	return found, MapError(err)
 }
 
 func (r *subscriptionRepository) Create(ctx context.Context, s *db.Subscription) (*db.Subscription, error) {

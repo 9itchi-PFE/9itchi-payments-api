@@ -131,6 +131,14 @@ type SubscriptionRepository struct {
 	LastEndedFn       func(ctx context.Context, userID string) (*db.Subscription, error)
 	ClaimRemindersFn  func(ctx context.Context, stage string, window time.Duration, limit int) ([]db.RenewalReminder, error)
 	ReleaseReminderFn func(ctx context.Context, subscriptionID, stage string) error
+	HasActiveOnPlanFn func(ctx context.Context, planID string) (bool, error)
+}
+
+func (m *SubscriptionRepository) HasActiveOnPlan(ctx context.Context, planID string) (bool, error) {
+	if m.HasActiveOnPlanFn == nil {
+		return false, nil
+	}
+	return m.HasActiveOnPlanFn(ctx, planID)
 }
 
 func (m *SubscriptionRepository) GetActiveByUser(ctx context.Context, userID string) (*db.Subscription, error) {
