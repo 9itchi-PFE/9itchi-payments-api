@@ -653,6 +653,14 @@ func TestCheckoutInASale(t *testing.T) {
 	assert.EqualValues(t, 50000, *saved.RegularMillimes)
 	assert.Equal(t, "Rentrée", saved.SaleName)
 
+	// A code typed during the sale is refused: nothing is opened.
+	before := charged
+	_, apiErr = svc.Checkout(context.Background(), userID, api.CheckoutRequest{PlanID: planA, PromoCode: "ENIS2027"})
+	require.NotNil(t, apiErr)
+	assert.Equal(t, http.StatusBadRequest, apiErr.Code)
+	assert.EqualError(t, apiErr.Error, reasonDuringSale)
+	assert.Equal(t, before, charged)
+
 	// The day after the sale: the usual price, and nothing about a sale on the payment.
 	now = time.Date(2027, 2, 16, 9, 0, 0, 0, time.UTC)
 	_, apiErr = svc.Checkout(context.Background(), userID, api.CheckoutRequest{PlanID: planA})

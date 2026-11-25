@@ -73,11 +73,17 @@ func validatePromoFields(code, typ string, value float64, from, until time.Time,
 }
 
 // discountFor computes the server-side discount for a promo on a plan at a given time.
+// reasonDuringSale is why a code is refused on a plan that is in a sale.
+const reasonDuringSale = "promo codes cannot be used during a sale"
+
 func discountFor(promo *db.PromoCode, plan *db.Plan, now time.Time) api.ValidatePromoResponse {
 	invalid := func(reason string) api.ValidatePromoResponse {
 		return api.ValidatePromoResponse{Valid: false, FinalPrice: plan.Price, Reason: reason}
 	}
 	switch {
+	case plan.Sale != nil:
+		// A sale and a code never add up: while the plan is in a sale, no code is taken.
+		return invalid(reasonDuringSale)
 	case now.Before(promo.ValidFrom):
 		return invalid("promo code is not yet valid")
 	case !now.Before(promo.ValidUntil):

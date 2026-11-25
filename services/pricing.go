@@ -56,9 +56,10 @@ func bestSale(p *db.Plan, running []db.Sale) *db.Sale {
 }
 
 // priceAt is a plan as it costs at a moment. Once the launch price is over the plan costs its regular price and
-// has nothing to strike through. A sale running that day then takes its percentage off that price: the plan
-// costs the price of the sale, the usual price is the one struck through (the regular price when the plan has
-// one), and Sale says which sale and until when. The free plan is never in a sale.
+// has nothing to strike through. A sale running that day takes its percentage off the usual price of the plan
+// (the regular price while a launch price runs, never the launch price): the plan then costs the price of the
+// sale, the usual price is struck through and Sale says which sale and until when. A launch price that is already
+// lower than the price of the sale stays: a sale never makes a plan cost more. The free plan is never in a sale.
 func priceAt(p *db.Plan, now time.Time, running []db.Sale) *db.Plan {
 	if p == nil {
 		return p
@@ -69,24 +70,26 @@ func priceAt(p *db.Plan, now time.Time, running []db.Sale) *db.Plan {
 	if over {
 		out.Price, out.RegularPrice, out.LaunchEndsOn = *p.RegularPrice, nil, nil
 	}
-	sale := bestSale(&out, running)
-	if sale == nil || out.Price <= 0 {
+	unchanged := func() *db.Plan {
 		if !over && p.Sale == nil {
 			return p // nothing to change: the plan as it is stored
 		}
 		return &out
 	}
+	sale := bestSale(&out, running)
+	if sale == nil || out.Price <= 0 {
+		return unchanged()
+	}
+	usual := out.Price
+	if out.RegularPrice != nil && *out.RegularPrice > usual {
+		usual = *out.RegularPrice
+	}
+	reduced := float64(millimes(usual)*int64(100-sale.Percent)/100) / 1000
+	if reduced >= out.Price {
+		return unchanged()
+	}
 	shown := *sale
-	// The price moves when the launch price ends too: the sale is announced until whichever comes first.
-	if out.LaunchEndsOn != nil && out.LaunchEndsOn.Before(shown.EndsOn) {
-		shown.EndsOn = *out.LaunchEndsOn
-	}
-	if out.RegularPrice == nil {
-		usual := out.Price
-		out.RegularPrice = &usual
-	}
-	out.Price = float64(millimes(out.Price)*int64(100-sale.Percent)/100) / 1000
-	out.LaunchEndsOn, out.Sale = nil, &shown
+	out.Price, out.RegularPrice, out.LaunchEndsOn, out.Sale = reduced, &usual, nil, &shown
 	return &out
 }
 
