@@ -37,6 +37,9 @@ type MySubscriptionResponse struct {
 	// Lapsed is set on the Free view when the last subscription ended without its renewal being paid and the
 	// student had not stopped it: the renewal is still due.
 	Lapsed *SubscriptionResponse `json:"lapsed"`
+	// KeptPrice is the launch price the student keeps when they renew without a gap of more than 7 days (null:
+	// none). When it is lower than today's price, Plan is shown at it.
+	KeptPrice *float64 `json:"kept_price"`
 }
 
 // PaymentResponse is one payment of the user: its state after the return from the gateway, and its receipt.

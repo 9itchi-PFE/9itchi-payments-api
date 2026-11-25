@@ -792,3 +792,57 @@ func TestSaleRepository(t *testing.T) {
 	_, err = repo.Update(ctx, one.ID, &db.Sale{Name: "x", Percent: 10, StartsOn: d(2, 1), EndsOn: d(2, 2)})
 	assert.ErrorIs(t, err, ErrNotFound)
 }
+
+func TestLaunchPriceKeptInRemindersAndRecords(t *testing.T) {
+	store := newTestStore(t)
+	plans := NewPlanRepository(store)
+	repo := NewSubscriptionRepository(store)
+	pays := NewPaymentRepository(store)
+	ctx := context.Background()
+
+	regular := 50.0
+	ended := time.Now().AddDate(0, 0, -3)
+	day := time.Date(ended.Year(), ended.Month(), ended.Day(), 0, 0, 0, 0, time.UTC)
+	plan, err := plans.Create(ctx, &db.Plan{Name: "Lancement", Price: 35, RegularPrice: &regular, LaunchEndsOn: &day, DurationDays: 30, Quotas: map[string]int{}, Active: true})
+	require.NoError(t, err)
+
+	n := 0
+	add := func(in time.Duration, launch *int64) string {
+		n++
+		s, err := repo.Create(ctx, &db.Subscription{UserID: fmt.Sprintf("00000000-0000-0000-0001-%012d", n), PlanID: plan.ID, Amount: 35,
+			StartsAt: time.Now().AddDate(0, 0, -30), EndsAt: time.Now().Add(in), LaunchMillimes: launch})
+		require.NoError(t, err)
+		return s.ID
+	}
+	kept := int64(35000)
+	keeps := add(3*24*time.Hour, &kept)
+	plain := add(3*24*time.Hour, nil)
+	lapsedKeeps := add(-2*24*time.Hour, &kept)
+	lapsedLate := add(-10*24*time.Hour, &kept)
+
+	sub, err := repo.GetActiveByUser(ctx, "00000000-0000-0000-0001-000000000001")
+	require.NoError(t, err)
+	require.NotNil(t, sub.LaunchMillimes)
+	assert.EqualValues(t, 35000, *sub.LaunchMillimes)
+
+	prices := func(stage string) map[string]float64 {
+		rs, err := repo.ClaimReminders(ctx, stage, 14*24*time.Hour, 10)
+		require.NoError(t, err)
+		out := map[string]float64{}
+		for _, r := range rs {
+			out[r.SubscriptionID] = r.PlanPrice
+		}
+		return out
+	}
+	due := prices(db.ReminderDue)
+	assert.InDelta(t, 35, due[keeps], 0.001, "the launch price is kept at renewal")
+	assert.InDelta(t, 50, due[plain], 0.001, "the launch is over for everyone else")
+	gone := prices(db.ReminderLapsed)
+	assert.InDelta(t, 35, gone[lapsedKeeps], 0.001, "2 days after the end, still kept")
+	assert.InDelta(t, 50, gone[lapsedLate], 0.001, "10 days after, today's price")
+
+	p, err := pays.Create(ctx, &db.Payment{UserID: "00000000-0000-0000-0001-000000000001", PlanID: plan.ID, Provider: "flouci", AmountMillimes: 35000, LaunchMillimes: &kept})
+	require.NoError(t, err)
+	require.NotNil(t, p.LaunchMillimes)
+	assert.EqualValues(t, 35000, *p.LaunchMillimes)
+}

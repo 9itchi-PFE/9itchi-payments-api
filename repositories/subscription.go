@@ -10,7 +10,7 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-const subscriptionColumns = `id, user_id, plan_id, promo_code_id, status, amount, starts_at, ends_at, stopped_at, created_at, updated_at`
+const subscriptionColumns = `id, user_id, plan_id, promo_code_id, status, amount, starts_at, ends_at, stopped_at, launch_millimes, created_at, updated_at`
 
 // SubscriptionRepository is the only layer that touches PostgreSQL for subscription data.
 type SubscriptionRepository interface {
@@ -65,9 +65,9 @@ func (r *subscriptionRepository) Create(ctx context.Context, s *db.Subscription)
 	ctx, cancel := QueryTimeout(ctx)
 	defer cancel()
 	rows, err := r.store.Conn(ctx).Query(ctx,
-		`INSERT INTO subscriptions (user_id, plan_id, promo_code_id, status, amount, starts_at, ends_at, stopped_at)
-		 VALUES ($1, $2, $3, COALESCE(NULLIF($4, ''), 'active'), $5, $6, $7, $8) RETURNING `+subscriptionColumns,
-		s.UserID, s.PlanID, s.PromoCodeID, s.Status, s.Amount, s.StartsAt, s.EndsAt, s.StoppedAt)
+		`INSERT INTO subscriptions (user_id, plan_id, promo_code_id, status, amount, starts_at, ends_at, stopped_at, launch_millimes)
+		 VALUES ($1, $2, $3, COALESCE(NULLIF($4, ''), 'active'), $5, $6, $7, $8, $9) RETURNING `+subscriptionColumns,
+		s.UserID, s.PlanID, s.PromoCodeID, s.Status, s.Amount, s.StartsAt, s.EndsAt, s.StoppedAt, s.LaunchMillimes)
 	if err != nil {
 		return nil, MapError(err)
 	}
@@ -140,9 +140,13 @@ func (r *subscriptionRepository) LastEnded(ctx context.Context, userID string) (
 // priceOn is what plan p costs at an instant: its regular price once the last day of the launch price is over in
 // Tunis (UTC+1 all year), else its price. A reminder names what the renewal will cost: the price on the day the
 // period ends, or today's once it has lapsed.
+// A student who subscribed at a launch price keeps it (s.launch_millimes) when the renewal comes at most 7 days
+// after the end of the period: then the reminder names the lower of the two.
 func priceOn(instant string) string {
-	return `CASE WHEN p.launch_ends_on IS NOT NULL AND ((` + instant + ` AT TIME ZONE 'UTC') + interval '1 hour')::date > p.launch_ends_on
-			THEN p.regular_price ELSE p.price END AS price`
+	plan := `CASE WHEN p.launch_ends_on IS NOT NULL AND ((` + instant + ` AT TIME ZONE 'UTC') + interval '1 hour')::date > p.launch_ends_on
+			THEN p.regular_price ELSE p.price END`
+	return `CASE WHEN s.launch_millimes IS NOT NULL AND ` + instant + ` <= s.ends_at + interval '7 days'
+			THEN LEAST(s.launch_millimes / 1000.0, ` + plan + `) ELSE ` + plan + ` END AS price`
 }
 
 // reminderQueries claim the subscriptions of one stage. The inner SELECT locks the rows it takes, so two instances

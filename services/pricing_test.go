@@ -25,8 +25,11 @@ func TestPriceAt(t *testing.T) {
 	// 22:59 UTC on the last day is still the last day in Tunis; one minute later it is February there.
 	lastMinute := time.Date(2027, 1, 31, 22, 59, 0, 0, time.UTC)
 	got := priceAt(p, lastMinute, nil)
-	assert.Same(t, p, got, "during the launch the plan is returned as it is")
-	assert.Equal(t, 35.0, got.Price)
+	assert.Equal(t, 35.0, got.Price, "during the launch the plan costs its launch price")
+	assert.Equal(t, 50.0, *got.RegularPrice)
+	require.NotNil(t, got.LaunchPrice, "the launch price a subscriber keeps")
+	assert.Equal(t, 35.0, *got.LaunchPrice)
+	assert.Nil(t, p.LaunchPrice, "the stored plan is not changed")
 
 	got = priceAt(p, lastMinute.Add(time.Minute), nil)
 	assert.Equal(t, 50.0, got.Price, "the day after, the plan costs its regular price")
@@ -171,7 +174,7 @@ func TestPriceAtInASale(t *testing.T) {
 	// A sale that would cost more than the launch price changes nothing: 20 % off 50 is 40, the plan stays at 35.
 	small := db.Sale{ID: "s5", Name: "Petite", Percent: 20, StartsOn: day(2027, 1, 20), EndsOn: day(2027, 2, 5)}
 	got = priceAt(launch, time.Date(2027, 1, 25, 9, 0, 0, 0, time.UTC), []db.Sale{small})
-	assert.Same(t, launch, got)
+	assert.Equal(t, 35.0, got.Price)
 	assert.Nil(t, got.Sale)
 	// Once the launch price is over, that sale applies.
 	got = priceAt(launch, time.Date(2027, 2, 2, 9, 0, 0, 0, time.UTC), []db.Sale{small})

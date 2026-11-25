@@ -14,9 +14,15 @@ type Subscription struct {
 	EndsAt      time.Time `db:"ends_at" json:"ends_at"`
 	// StoppedAt is when the student stopped the renewal; nil means a new payment is asked when the period ends.
 	StoppedAt *time.Time `db:"stopped_at" json:"stopped_at"`
-	CreatedAt time.Time  `db:"created_at" json:"created_at"`
-	UpdatedAt time.Time  `db:"updated_at" json:"updated_at"`
+	// LaunchMillimes is the launch price the student keeps on this plan (nil: none). See KeepGap.
+	LaunchMillimes *int64    `db:"launch_millimes" json:"launch_millimes"`
+	CreatedAt      time.Time `db:"created_at" json:"created_at"`
+	UpdatedAt      time.Time `db:"updated_at" json:"updated_at"`
 }
+
+// KeepGap is the longest gap between the end of a subscription and its renewal for the student to keep their
+// launch price.
+const KeepGap = 7 * 24 * time.Hour
 
 // Renewal reminder stages.
 const (

@@ -116,12 +116,16 @@ func (s *subscriptionService) Checkout(ctx context.Context, userID string, req a
 	if plan.Price <= 0 {
 		return nil, badRequest("the free plan needs no checkout")
 	}
+	plan, launch, apiErr := s.withKeptLaunch(ctx, userID, plan)
+	if apiErr != nil {
+		return nil, apiErr
+	}
 	amount, discount, promoID, apiErr := s.price(ctx, plan, req.PromoCode)
 	if apiErr != nil {
 		return nil, apiErr
 	}
 	pay := &db.Payment{UserID: userID, PlanID: plan.ID, PromoCodeID: promoID, Provider: checkoutProvider,
-		AmountMillimes: amount, DiscountMillimes: discount}
+		AmountMillimes: amount, DiscountMillimes: discount, LaunchMillimes: launch}
 	if plan.RegularPrice != nil {
 		regular := millimes(*plan.RegularPrice)
 		pay.RegularMillimes = &regular
@@ -228,7 +232,7 @@ func (s *subscriptionService) complete(ctx context.Context, pay *db.Payment) (ap
 		now := s.now()
 		end := now.AddDate(0, 0, plan.DurationDays)
 		if _, err := s.repo.Create(ctx, &db.Subscription{UserID: pay.UserID, PlanID: pay.PlanID, PromoCodeID: pay.PromoCodeID,
-			Amount: float64(pay.AmountMillimes) / 1000, StartsAt: now, EndsAt: end}); err != nil {
+			Amount: float64(pay.AmountMillimes) / 1000, StartsAt: now, EndsAt: end, LaunchMillimes: pay.LaunchMillimes}); err != nil {
 			return err
 		}
 		subCreated = true
@@ -271,6 +275,13 @@ func (s *subscriptionService) MySubscription(ctx context.Context, userID string)
 	resp := &api.MySubscriptionResponse{Plan: mapping.PlanToResponse(plan), IsFree: sub == nil}
 	if sub != nil {
 		resp.Subscription = mapping.SubscriptionToResponse(sub)
+		// The renewal costs the launch price the student keeps: the plan is shown at that price.
+		if kept := keptPrice(sub, plan, s.now()); kept > 0 {
+			resp.Plan = mapping.PlanToResponse(atKeptPrice(plan, kept))
+			resp.KeptPrice = ptrFloat(float64(kept) / 1000)
+		} else if kept := keeps(sub, plan, s.now()); kept > 0 {
+			resp.KeptPrice = ptrFloat(float64(kept) / 1000)
+		}
 		return resp, nil
 	}
 	// Nothing active: say whether a renewal is still waiting to be paid.
@@ -280,6 +291,11 @@ func (s *subscriptionService) MySubscription(ctx context.Context, userID string)
 	}
 	if last != nil && last.StoppedAt == nil {
 		resp.Lapsed = mapping.SubscriptionToResponse(last)
+		if lastPlan, err := s.plans.GetByID(ctx, last.PlanID); err == nil {
+			if kept := keeps(last, lastPlan, s.now()); kept > 0 {
+				resp.KeptPrice = ptrFloat(float64(kept) / 1000)
+			}
+		}
 	}
 	return resp, nil
 }
@@ -478,3 +494,64 @@ func (s *subscriptionService) SendRenewalReminders(ctx context.Context) (*api.Re
 	}
 	return res, nil
 }
+
+// keeps is the launch price, in millimes, the holder of sub keeps on plan: the launch price they subscribed at,
+// when the renewal comes at most KeepGap after the end of sub. 0 when nothing is kept.
+func keeps(sub *db.Subscription, plan *db.Plan, now time.Time) int64 {
+	if sub == nil || plan == nil || sub.LaunchMillimes == nil || sub.PlanID != plan.ID || now.Sub(sub.EndsAt) > db.KeepGap {
+		return 0
+	}
+	return *sub.LaunchMillimes
+}
+
+// keptPrice is what keeps gives when it is lower than what plan costs today (a sale or a new launch price can be
+// lower): the price a renewal is charged. 0 when today's price applies.
+func keptPrice(sub *db.Subscription, plan *db.Plan, now time.Time) int64 {
+	if kept := keeps(sub, plan, now); kept > 0 && kept < millimes(plan.Price) {
+		return kept
+	}
+	return 0
+}
+
+// atKeptPrice is plan at the launch price kept by a subscriber: the price of today is struck through.
+func atKeptPrice(plan *db.Plan, kept int64) *db.Plan {
+	out := *plan
+	usual := plan.Price
+	if plan.RegularPrice != nil && *plan.RegularPrice > usual {
+		usual = *plan.RegularPrice
+	}
+	out.Price, out.RegularPrice, out.LaunchEndsOn, out.Sale = float64(kept)/1000, &usual, nil, nil
+	launch := out.Price
+	out.LaunchPrice = &launch
+	return &out
+}
+
+// withKeptLaunch prices plan for a checkout by userID: at the launch price they keep when they renew in time.
+// It also says which launch price the payment carries on to the subscription (the lowest of the one kept and
+// the one running today), nil when none: a renewal paid during a cheaper sale still keeps the launch price.
+func (s *subscriptionService) withKeptLaunch(ctx context.Context, userID string, plan *db.Plan) (*db.Plan, *int64, *models.ApiError) {
+	cur, err := s.repo.GetActiveByUser(ctx, userID)
+	if err != nil && !errors.Is(err, repositories.ErrNotFound) {
+		return nil, nil, repoError(err, "plan not found")
+	}
+	if cur == nil {
+		if cur, err = s.repo.LastEnded(ctx, userID); err != nil && !errors.Is(err, repositories.ErrNotFound) {
+			return nil, nil, repoError(err, "plan not found")
+		}
+	}
+	var carry *int64
+	if kept := keeps(cur, plan, s.now()); kept > 0 {
+		carry = &kept
+	}
+	if plan.LaunchPrice != nil {
+		if launch := millimes(*plan.LaunchPrice); carry == nil || launch < *carry {
+			carry = &launch
+		}
+	}
+	if kept := keptPrice(cur, plan, s.now()); kept > 0 {
+		return atKeptPrice(plan, kept), carry, nil
+	}
+	return plan, carry, nil
+}
+
+func ptrFloat(f float64) *float64 { return &f }
