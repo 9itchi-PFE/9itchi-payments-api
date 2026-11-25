@@ -12,6 +12,8 @@ import (
 
 // Services holds service implementations and the peer clients they call.
 type Services struct {
+	// Erase removes what this service keeps about a deleted account.
+	Erase        EraseService
 	Plan         PlanService
 	Promo        PromoService
 	Subscription SubscriptionService
@@ -33,6 +35,7 @@ func InitServices(config utils.AppConfig, repos *repositories.Repositories) *Ser
 	priced := PricedPlans(repos.Plan, repos.Sale, time.Now)
 	events := core.NewPublisher(config.RabbitMQURL)
 	return &Services{
+		Erase:        NewEraseService(repos.Erase),
 		Plan:         NewPlanService(repos.Plan, priced, repos.Subscription),
 		Promo:        NewPromoService(repos.Promo, priced),
 		Subscription: NewSubscriptionService(repos.Subscription, priced, repos.Promo, repos.Payment, repos.Store, providers, events),

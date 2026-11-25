@@ -69,6 +69,7 @@ func initializeRoutes(r *gin.Engine, services *services.Services) {
 	internalGroup := r.Group("/")
 	internalGroup.Use(InternalAPIKeyMiddleware())
 	{
+		internalGroup.DELETE("/internal/users/:id", handlers.EraseUser(services.Erase))
 		internalGroup.GET("/internal/quotas/:userId", handlers.GetQuotas(services.Plan))
 		internalGroup.POST("/internal/subscriptions/renewal-reminders", handlers.SendRenewalReminders(services.Subscription))
 	}
