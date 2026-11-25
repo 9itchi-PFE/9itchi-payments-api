@@ -50,6 +50,19 @@ The legal information printed on receipts (`legal_name`, `address`, `tax_id`, `v
 | POST | `/admin/users/:id/gifts` | admin | GiveMonth (30 days for free; 409 within a minute of the last one, or when no paid plan is on sale) |
 | POST | `/webhooks/:provider` | public | Webhook (signature verified; 404 unknown provider, 401 bad signature) |
 
+## What a plan allows (`quotas`)
+
+`quotas` is a free map of limits read by the other services through `GET /internal/quotas/:userId`, which also gives `period_start`, the start of the current period of the subscription (null without one). The keys in use:
+
+| Key | Read by | Meaning |
+|---|---|---|
+| `resumes` | resume-api | how many CVs |
+| `cv_downloads` | resume-api | downloads of a CV per period of the subscription; `0` allows none |
+| `ats_contact`, `ats_summary`, `ats_experience`, `ats_education`, `ats_skills`, `ats_layout`, `ats_file` | resume-api | `0` hides that group of the CV diagnosis |
+| `emails_per_month` | email-api | applications sent by 9itchi |
+
+A key that is absent sets no limit. **There is no free offer**: the plan named `Free` is what a student with no subscription gets (migration `0010`): one CV, no download, and the diagnosis limited to contact and summary. It can be changed like any plan.
+
 ## A month given by the team
 
 `POST /admin/users/:id/gifts` gives the student 30 days, with no body: the admin is read from the token and kept with the gift (`subscription_gifts`).

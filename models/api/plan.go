@@ -56,4 +56,7 @@ type QuotasResponse struct {
 	PlanID   string         `json:"plan_id"`
 	PlanName string         `json:"plan_name"`
 	Quotas   map[string]int `json:"quotas"`
+	// PeriodStart is when the current period of the subscription began: limits "per period" (the downloads of a
+	// CV) count from there. Null without a subscription.
+	PeriodStart *time.Time `json:"period_start"`
 }

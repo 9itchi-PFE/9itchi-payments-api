@@ -162,6 +162,7 @@ func TestGetQuotas(t *testing.T) {
 		res, apiErr := NewPlanService(plans, subs).GetQuotas(context.Background(), userID)
 		require.Nil(t, apiErr)
 		assert.Equal(t, map[string]int{"emails_per_month": 100}, res.Quotas)
+		assert.NotNil(t, res.PeriodStart)
 	})
 	t.Run("free fallback", func(t *testing.T) {
 		subs := &mocks.SubscriptionRepository{GetActiveByUserFn: func(context.Context, string) (*db.Subscription, error) {
@@ -171,6 +172,7 @@ func TestGetQuotas(t *testing.T) {
 		require.Nil(t, apiErr)
 		assert.Equal(t, FreePlanName, res.PlanName)
 		assert.Equal(t, 1, res.Quotas["resumes"])
+		assert.Nil(t, res.PeriodStart, "no subscription, no period")
 	})
 	t.Run("subscription lookup failure", func(t *testing.T) {
 		subs := &mocks.SubscriptionRepository{GetActiveByUserFn: func(context.Context, string) (*db.Subscription, error) {
@@ -219,4 +221,18 @@ func TestPlanRegularPrice(t *testing.T) {
 		require.NotNil(t, apiErr)
 		assert.Equal(t, http.StatusBadRequest, apiErr.Code)
 	})
+}
+
+func TestPeriodStart(t *testing.T) {
+	plan := &db.Plan{DurationDays: 30}
+	began := time.Date(2026, 9, 1, 9, 0, 0, 0, time.UTC)
+	assert.Nil(t, periodStart(nil, plan))
+	first := periodStart(&db.Subscription{StartsAt: began, EndsAt: began.AddDate(0, 0, 30)}, plan)
+	assert.Equal(t, began, *first)
+	third := periodStart(&db.Subscription{StartsAt: began, EndsAt: began.AddDate(0, 0, 90)}, plan)
+	assert.Equal(t, began.AddDate(0, 0, 60), *third, "a renewed subscription: its third period")
+	short := periodStart(&db.Subscription{StartsAt: began, EndsAt: began.AddDate(0, 0, 10)}, plan)
+	assert.Equal(t, began, *short, "never before the subscription itself")
+	odd := periodStart(&db.Subscription{StartsAt: began, EndsAt: began.AddDate(0, 0, 90)}, &db.Plan{})
+	assert.Equal(t, began, *odd)
 }
