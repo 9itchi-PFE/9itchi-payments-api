@@ -155,20 +155,28 @@ func TestPriceAtInASale(t *testing.T) {
 	assert.Equal(t, 30.0, got.Price)
 	assert.Equal(t, "Flash", got.Sale.Name)
 
-	// A sale on top of a launch price: taken off the launch price, the regular price stays the one struck
-	// through, and the sale is announced until the launch price ends when that comes first.
+	// With a launch price the percentage is taken off the regular price, never the launch price.
 	launch := launchPlan() // 35 instead of 50 until 31 January 2027
-	january := db.Sale{ID: "s4", Name: "Janvier", Percent: 20, StartsOn: day(2027, 1, 20), EndsOn: day(2027, 2, 5)}
+	january := db.Sale{ID: "s4", Name: "Janvier", Percent: 40, StartsOn: day(2027, 1, 20), EndsOn: day(2027, 2, 5)}
 	got = priceAt(launch, time.Date(2027, 1, 25, 9, 0, 0, 0, time.UTC), []db.Sale{january})
-	assert.Equal(t, 28.0, got.Price)
+	assert.Equal(t, 30.0, got.Price, "40 % off 50, not off 35")
 	assert.Equal(t, 50.0, *got.RegularPrice)
 	assert.Nil(t, got.LaunchEndsOn)
-	assert.Equal(t, day(2027, 1, 31), got.Sale.EndsOn)
-	// After the launch: off the regular price, until the end of the sale.
-	got = priceAt(launch, time.Date(2027, 2, 2, 9, 0, 0, 0, time.UTC), []db.Sale{january})
-	assert.Equal(t, 40.0, got.Price)
-	assert.Equal(t, 50.0, *got.RegularPrice)
 	assert.Equal(t, day(2027, 2, 5), got.Sale.EndsOn)
+	// After the launch: the same price until the end of the sale.
+	got = priceAt(launch, time.Date(2027, 2, 2, 9, 0, 0, 0, time.UTC), []db.Sale{january})
+	assert.Equal(t, 30.0, got.Price)
+	assert.Equal(t, 50.0, *got.RegularPrice)
+
+	// A sale that would cost more than the launch price changes nothing: 20 % off 50 is 40, the plan stays at 35.
+	small := db.Sale{ID: "s5", Name: "Petite", Percent: 20, StartsOn: day(2027, 1, 20), EndsOn: day(2027, 2, 5)}
+	got = priceAt(launch, time.Date(2027, 1, 25, 9, 0, 0, 0, time.UTC), []db.Sale{small})
+	assert.Same(t, launch, got)
+	assert.Nil(t, got.Sale)
+	// Once the launch price is over, that sale applies.
+	got = priceAt(launch, time.Date(2027, 2, 2, 9, 0, 0, 0, time.UTC), []db.Sale{small})
+	assert.Equal(t, 40.0, got.Price)
+	assert.Equal(t, "Petite", got.Sale.Name)
 
 	// Never below a millime, never the free plan.
 	odd := &db.Plan{ID: "p2", Price: 49.99}

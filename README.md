@@ -75,8 +75,8 @@ A sale (`sales`, migration `0012`) has a name students see, a percentage (1 to 9
 While a sale runs, every price a student is shown or charged is the price of the sale: `GET /plans` returns it in `price`, the usual price in `regular_price`, and `sale: {name, percent, ends_on}`. The checkout charges it, and the payment keeps the usual price (`regular_millimes`) and the name of the sale (`sale_name`) for the receipt. Nothing is stored on the plan: the day after the last day the plan costs what it cost before.
 
 - Two sales the same day: the one that takes the most off wins; they do not add up.
-- On a plan with a launch price the percentage is taken off the launch price, and the regular price stays the one struck through.
-- A promo code typed at the checkout applies after the sale, on the price of the sale.
+- On a plan with a launch price the percentage is taken off the **regular price**, never the launch price. If that leaves a price above the launch price, the launch price stays and the plan is not shown as in a sale: a sale never makes a plan cost more.
+- **No promo code during a sale**: `POST /promo-codes/validate` answers `valid: false` with the reason `promo codes cannot be used during a sale`, and a checkout with a code is refused (`400`).
 - A subscription already paid does not change; a renewal paid during the sale costs the price of the sale.
 - Deleting a running sale ends it at once.
 

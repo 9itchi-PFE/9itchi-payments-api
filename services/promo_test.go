@@ -215,3 +215,20 @@ func TestListPromos(t *testing.T) {
 	require.Len(t, res.Items, 1)
 	assert.NotNil(t, res.Items[0].PlanIDs)
 }
+
+// A sale and a code never add up: a plan in a sale takes no code, at the check and at the checkout.
+func TestNoPromoCodeDuringASale(t *testing.T) {
+	now := time.Date(2027, 2, 10, 9, 0, 0, 0, time.UTC)
+	promo := &db.PromoCode{ID: "c1", Code: "ENIS2027", Type: promoPercentage, Value: 10, ValidFrom: now.Add(-time.Hour), ValidUntil: now.Add(time.Hour)}
+	usual := 50.0
+	inSale := &db.Plan{ID: "p1", Price: 35, RegularPrice: &usual, Sale: &db.Sale{Name: "Rentrée", Percent: 30}}
+	res := discountFor(promo, inSale, now)
+	assert.False(t, res.Valid)
+	assert.Equal(t, reasonDuringSale, res.Reason)
+	assert.Equal(t, 35.0, res.FinalPrice, "the price of the sale stays the price")
+
+	plain := &db.Plan{ID: "p1", Price: 50}
+	res = discountFor(promo, plain, now)
+	assert.True(t, res.Valid)
+	assert.Equal(t, 45.0, res.FinalPrice)
+}
