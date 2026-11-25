@@ -162,6 +162,7 @@ func TestGetQuotas(t *testing.T) {
 		res, apiErr := NewPlanService(plans, subs).GetQuotas(context.Background(), userID)
 		require.Nil(t, apiErr)
 		assert.Equal(t, map[string]int{"emails_per_month": 100}, res.Quotas)
+		assert.NotNil(t, res.PeriodStart)
 	})
 	t.Run("free fallback", func(t *testing.T) {
 		subs := &mocks.SubscriptionRepository{GetActiveByUserFn: func(context.Context, string) (*db.Subscription, error) {
@@ -171,6 +172,7 @@ func TestGetQuotas(t *testing.T) {
 		require.Nil(t, apiErr)
 		assert.Equal(t, FreePlanName, res.PlanName)
 		assert.Equal(t, 1, res.Quotas["resumes"])
+		assert.Nil(t, res.PeriodStart, "no subscription, no period")
 	})
 	t.Run("subscription lookup failure", func(t *testing.T) {
 		subs := &mocks.SubscriptionRepository{GetActiveByUserFn: func(context.Context, string) (*db.Subscription, error) {
@@ -219,4 +221,24 @@ func TestPlanRegularPrice(t *testing.T) {
 		require.NotNil(t, apiErr)
 		assert.Equal(t, http.StatusBadRequest, apiErr.Code)
 	})
+}
+
+func TestPeriodStart(t *testing.T) {
+	plan := &db.Plan{DurationDays: 30}
+	began := time.Date(2026, 9, 1, 9, 0, 0, 0, time.UTC)
+	day := func(n int) time.Time { return began.AddDate(0, 0, n) }
+	assert.Nil(t, periodStart(nil, plan, day(1)))
+	first := periodStart(&db.Subscription{StartsAt: began, EndsAt: day(30)}, plan, day(12))
+	assert.Equal(t, began, *first)
+	third := periodStart(&db.Subscription{StartsAt: began, EndsAt: day(90)}, plan, day(75))
+	assert.Equal(t, day(60), *third, "a renewed subscription: its third period")
+	// A month given, or a renewal paid ahead: the end is two periods away, the period in progress is the one now is in.
+	ahead := periodStart(&db.Subscription{StartsAt: began, EndsAt: day(90)}, plan, day(40))
+	assert.Equal(t, day(30), *ahead, "never a start in the future: nothing would be counted")
+	early := periodStart(&db.Subscription{StartsAt: began, EndsAt: day(60)}, plan, day(5))
+	assert.Equal(t, began, *early)
+	short := periodStart(&db.Subscription{StartsAt: began, EndsAt: day(10)}, plan, day(3))
+	assert.Equal(t, began, *short, "never before the subscription itself")
+	odd := periodStart(&db.Subscription{StartsAt: began, EndsAt: day(90)}, &db.Plan{}, day(40))
+	assert.Equal(t, began, *odd)
 }

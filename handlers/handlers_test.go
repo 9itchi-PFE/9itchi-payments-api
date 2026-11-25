@@ -175,7 +175,7 @@ func TestGetQuotasHandler(t *testing.T) {
 	}}
 	w := do(http.MethodGet, "/internal/quotas/:userId", "/internal/quotas/u9", "", GetQuotas(svc))
 	assert.Equal(t, http.StatusOK, w.Code)
-	assert.JSONEq(t, `{"user_id":"u9","plan_id":"","plan_name":"","quotas":{"resumes":3}}`, w.Body.String())
+	assert.JSONEq(t, `{"user_id":"u9","plan_id":"","plan_name":"","quotas":{"resumes":3},"period_start":null}`, w.Body.String())
 }
 
 func TestValidatePromoHandler(t *testing.T) {
