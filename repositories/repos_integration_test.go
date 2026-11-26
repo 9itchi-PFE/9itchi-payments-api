@@ -37,8 +37,8 @@ func TestPlanRepository(t *testing.T) {
 	assert.Equal(t, map[string]int{"emails_per_month": 0, "resumes": 1, "cv_downloads": 0, "cv_edit": 0, "ats_contact": 0, "ats_summary": 0,
 		"ats_experience": 0, "ats_education": 0, "ats_skills": 0, "ats_layout": 0, "ats_file": 0, "free_applications": 3,
 		"ai_drafts_per_month": 0, "ai_rewrites_per_month": 0, "ai_matches_per_month": 0,
-		"recruiter_searches_per_day": 0}, free.Quotas,
-		"without a subscription: 3 applications with the imported CV, nothing else")
+		"recruiter_searches_per_day": 0, "ai_scores_per_day": 3}, free.Quotas,
+		"without a subscription: 3 applications with the imported CV and 3 AI scores a day, nothing else")
 
 	assert.Equal(t, "Découverte", free.Details["fr"].Label)
 	assert.Equal(t, "To start your PFE search", free.Details["en"].Tagline)
