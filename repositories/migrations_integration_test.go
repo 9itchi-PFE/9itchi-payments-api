@@ -6,6 +6,11 @@ import (
 	"context"
 	"testing"
 
+	"9itchi-payments-api/migrations"
+	"9itchi-payments-api/models/db"
+
+	"github.com/jackc/pgx/v5/stdlib"
+	"github.com/pressly/goose/v3"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -22,6 +27,31 @@ func TestMigrationsCreateTables(t *testing.T) {
 			assert.Equal(t, 0, n)
 		}
 	}
+}
+
+func TestMigrationRecruiterSearches(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	sqlDB := stdlib.OpenDB(*store.pool.Config().ConnConfig)
+	defer sqlDB.Close()
+	provider, err := goose.NewProvider(goose.DialectPostgres, sqlDB, migrations.FS)
+	require.NoError(t, err)
+
+	_, err = provider.DownTo(ctx, 17)
+	require.NoError(t, err)
+	repo := NewPlanRepository(store)
+	_, err = repo.Create(ctx, &db.Plan{Name: "Pro", Price: 9.99, DurationDays: 30, Quotas: map[string]int{"resumes": 10}})
+	require.NoError(t, err)
+	_, err = provider.UpTo(ctx, 18)
+	require.NoError(t, err)
+
+	pro, err := repo.GetByName(ctx, "Pro")
+	require.NoError(t, err)
+	assert.Equal(t, 6, pro.Quotas["recruiter_searches_per_day"], "every paid plan, even switched off")
+	assert.Equal(t, 10, pro.Quotas["resumes"])
+	free, err := repo.GetByName(ctx, "Free")
+	require.NoError(t, err)
+	assert.Equal(t, 0, free.Quotas["recruiter_searches_per_day"])
 }
 
 func TestUUIDScansIntoString(t *testing.T) {
