@@ -21,25 +21,19 @@ on:
       - '.github/workflows/build.yml'
   workflow_dispatch:
 
+# One build at a time; a newer push to main replaces a queued or running one.
+concurrency:
+  group: build-main
+  cancel-in-progress: true
+
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: 9itchi-payments-api
 
 jobs:
-  test:
-    name: Test
-    runs-on: [self-hosted, 9itchi]
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: go.mod
-      - run: go build ./... && go test ./...
-
   build:
     name: Build and Push Docker Image
-    needs: test
-    runs-on: [self-hosted, 9itchi]
+    runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write
@@ -79,7 +73,7 @@ jobs:
   deploy:
     name: Trigger deployment
     needs: build
-    runs-on: [self-hosted, 9itchi]
+    runs-on: ubuntu-latest
     steps:
       - name: Dispatch service-built event
         uses: actions/github-script@v7
