@@ -14,19 +14,21 @@ Plans and quotas (single source of truth for subscriptions), promo codes, sales,
 ## Routes
 - Public: `GET /plans`, `POST /webhooks/:provider`.
 - User: `POST /promo-codes/validate`; `POST /subscriptions/checkout|cancel|resume`, `GET /subscriptions/me`; `GET /payments`, `POST /payments/:id/verify`; `GET /receipt-issuer`; `GET /student-discount/me`.
-- Admin: `/admin/plans` GET|POST, `/:id` PUT|DELETE (deactivate); `/admin/promo-codes` and `/admin/sales` same shape; `PUT /admin/receipt-issuer`; `GET|PUT /admin/student-discount`; `GET /admin/users/:id/subscription|payments`; `GET|POST /admin/users/:id/gifts`.
+- Admin: `/admin/plans` GET|POST, `/:id` PUT|DELETE (deactivate); `/admin/promo-codes` and `/admin/sales` same shape; `PUT /admin/receipt-issuer`; `GET|PUT /admin/student-discount`; `GET /admin/users/:id/subscription|payments`; `GET|POST /admin/users/:id/gifts`; `/admin/free-grants` GET|POST (many emails, same quotas), `/:email` PUT|DELETE.
 - Internal: `GET /internal/quotas/:userId` (resume, email), `POST /internal/subscriptions/renewal-reminders` (schedule), `DELETE /internal/users/:id`.
 
 ## Data, events, providers
-- Tables: `plans`, `promo_codes`, `sales`, `subscriptions`, `payments`, `receipt_issuer`, `subscription_gifts`, `student_discount` (one row). Latest `0020_student_discount.sql`.
+- Tables: `plans`, `promo_codes`, `sales`, `subscriptions`, `payments`, `receipt_issuer`, `subscription_gifts`, `student_discount` (one row), `free_grants` (email PK, lower-case). Latest `0021_free_grants.sql`.
 - Publishes `payment.completed`, `subscription.created`, `subscription.renewal_due` (`due` | `lapsed`), `subscription.gifted`. Consumes nothing.
 - `core.ProviderFactory` = `map[string]func() PaymentProvider`, only `flouci`; checkout 503 until keys set. Webhook signature constant-time, payment always re-verified with gateway, replays idempotent.
+- Calls account-api `GET /internal/users/:id` (email, `email_verified`) for free grants.
 - Env: `RABBITMQ_URL`, `ACCOUNT_API_URL`, `FRONTEND_URL`, `FLOUCI_BASE_URL|PUBLIC_KEY|PRIVATE_KEY|WEBHOOK_SECRET|WEBHOOK_URL`.
 
 ## Domain rules
 - Admin plans: every plan but Free must cost > 0 and cannot be named Free (any case); names unique (409). `DELETE` switches a plan off (gone from `GET /plans`, checkout 404, subscribers keep access to `ends_at`); `PUT active: true` switches it on. `duration_days` cannot change while the plan has active subscribers (409, message contains "length"): quota periods count with it.
 - Plan change (e.g. monthly -> yearly): new plan starts now, unused days of the old one are added at its end. Same plan: extends from current end.
-- Free plan = "no subscription"; `GET /subscriptions/me` falls back to it. Free (since `0015`): `free_applications` 3, `cv_edit` 0, `cv_downloads` 0, AI quotas 0, `ats_*` 0, `recruiter_searches_per_day` 0 (`0018`, paid plans 6), `ai_scores_per_day` 3 (`0019`, paid plans 15). All editable in admin Plans.
+- Free plan = "no subscription"; `GET /subscriptions/me` falls back to it. Free (since `0021`, 28 Nov. 2026): every quota 0 (`resumes`, `free_applications`, `ai_scores_per_day`, AI, `ats_*`, `cv_*`, `recruiter_searches_per_day`): only reading offers. Paid plans: `recruiter_searches_per_day` 6, `ai_scores_per_day` 15. All editable in admin Plans.
+- Free grants (`services/grant.go`): admin gives quotas to emails; while the user has no subscription, `GET /internal/quotas/:userId` and `/subscriptions/me` lay them over Free key by key (plan name stays Free, `/me` sets `granted`). Only when account-api says the email is `email_verified` (Google/LinkedIn sign-in). Account-api or grant read failure = plain Free (logged). Counting periods are Free ones (e.g. `free_applications` lifetime).
 - Plan `details` (jsonb, `fr`/`en`/`ar`: label <= 40, tagline <= 120, <= 10 features of 1..140 runes) is the text students read; any fault is a 400. Nil on `PUT` keeps the current details, `{}` clears them; Free seeded in `0017`.
 - Quota keys: `resumes`, `cv_downloads` (per period), `ats_<group>`, `cv_edit`, `ai_{drafts,rewrites,matches}_per_month`, `free_applications` (account lifetime), `emails_per_month`, `recruiter_searches_per_day` and `ai_scores_per_day` (per Tunis day, read by email-api). Missing key = unlimited: admin-created plans copy quotas from an existing plan, so a plan made without the key has unlimited recruiter searches.
 - Pricing (`services/pricing.go`, Tunis days): launch price until `launch_ends_on`, then `regular_price`. Sale % applies to the regular price, never the launch price, never raises the price, never on Free. No promo code during a sale; best of two sales wins.
@@ -38,4 +40,4 @@ Plans and quotas (single source of truth for subscriptions), promo codes, sales,
 - Refunds are manual at Flouci (7-day rule, pending legal check); no refund code here.
 
 ## Gotchas
-- `pkg/account` client is an unused stub. Real Flouci merchant account not yet available.
+- Real Flouci merchant account not yet available.

@@ -34,20 +34,20 @@ func TestPlanRepository(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, 0.0, free.Price)
 	assert.Equal(t, 36500, free.DurationDays)
-	assert.Equal(t, map[string]int{"emails_per_month": 0, "resumes": 1, "cv_downloads": 0, "cv_edit": 0, "ats_contact": 0, "ats_summary": 0,
-		"ats_experience": 0, "ats_education": 0, "ats_skills": 0, "ats_layout": 0, "ats_file": 0, "free_applications": 3,
+	assert.Equal(t, map[string]int{"emails_per_month": 0, "resumes": 0, "cv_downloads": 0, "cv_edit": 0, "ats_contact": 0, "ats_summary": 0,
+		"ats_experience": 0, "ats_education": 0, "ats_skills": 0, "ats_layout": 0, "ats_file": 0, "free_applications": 0,
 		"ai_drafts_per_month": 0, "ai_rewrites_per_month": 0, "ai_matches_per_month": 0,
-		"recruiter_searches_per_day": 0, "ai_scores_per_day": 3}, free.Quotas,
-		"without a subscription: 3 applications with the imported CV and 3 AI scores a day, nothing else")
+		"recruiter_searches_per_day": 0, "ai_scores_per_day": 0}, free.Quotas,
+		"without a subscription: only reading offers, every quota at 0")
 
 	assert.Equal(t, "Découverte", free.Details["fr"].Label)
 	assert.Equal(t, "To start your PFE search", free.Details["en"].Tagline)
 	assert.Equal(t, "اكتشاف", free.Details["ar"].Label)
 	for _, l := range []string{"fr", "en", "ar"} {
-		assert.Len(t, free.Details[l].Features, 3, l)
+		assert.Len(t, free.Details[l].Features, 2, l)
 		assert.NotEmpty(t, free.Details[l].Tagline, l)
 	}
-	assert.Equal(t, "3 applications with your imported CV", free.Details["en"].Features[1])
+	assert.Equal(t, "Alerts on new offers", free.Details["en"].Features[1])
 
 	pro, err := repo.Create(ctx, &db.Plan{Name: "Pro", Price: 9.99, DurationDays: 30, Quotas: map[string]int{"resumes": 10}, Active: true})
 	require.NoError(t, err)
@@ -896,4 +896,44 @@ func TestStudentDiscountRepository(t *testing.T) {
 
 	_, err = repo.Update(ctx, admin, &db.StudentDiscount{Percent: 101})
 	assert.Error(t, err, "the check keeps the percent within 0..100")
+}
+
+func TestFreeGrantRepository(t *testing.T) {
+	store := newTestStore(t)
+	repo := NewFreeGrantRepository(store)
+	ctx := context.Background()
+	const admin = "0b8f9a52-6d0e-4e0a-9d43-2f7c1e0d5a11"
+
+	out, err := repo.Upsert(ctx, admin, []string{"a@b.tn", "c@d.tn"}, map[string]int{"free_applications": 5}, "pilot")
+	require.NoError(t, err)
+	require.Len(t, out, 2)
+	assert.Equal(t, 5, out[0].Quotas["free_applications"])
+	require.NotNil(t, out[0].GivenBy)
+
+	again, err := repo.Upsert(ctx, "", []string{"a@b.tn"}, map[string]int{"resumes": 1}, "")
+	require.NoError(t, err)
+	assert.Equal(t, map[string]int{"resumes": 1}, again[0].Quotas, "a second grant replaces the first")
+	assert.Nil(t, again[0].GivenBy)
+
+	one, err := repo.Update(ctx, admin, "c@d.tn", map[string]int{"cv_edit": 1}, "x")
+	require.NoError(t, err)
+	assert.Equal(t, "x", one.Note)
+	_, err = repo.Update(ctx, admin, "none@d.tn", map[string]int{"cv_edit": 1}, "")
+	assert.ErrorIs(t, err, ErrNotFound)
+
+	got, err := repo.Get(ctx, "a@b.tn")
+	require.NoError(t, err)
+	assert.Equal(t, 1, got.Quotas["resumes"])
+
+	list, err := repo.List(ctx)
+	require.NoError(t, err)
+	assert.Len(t, list, 2)
+
+	require.NoError(t, repo.Delete(ctx, "a@b.tn"))
+	assert.ErrorIs(t, repo.Delete(ctx, "a@b.tn"), ErrNotFound)
+	_, err = repo.Get(ctx, "a@b.tn")
+	assert.ErrorIs(t, err, ErrNotFound)
+
+	_, err = repo.Upsert(ctx, admin, []string{"Upper@b.tn"}, map[string]int{}, "")
+	assert.Error(t, err, "emails are stored lower-cased")
 }

@@ -60,6 +60,8 @@ type subscriptionService struct {
 	providers core.ProviderFactory
 	events    core.Publisher
 	now       func() time.Time
+	// grants is the free usage given to emails, laid over the Free plan (nil: none).
+	grants *freeGrants
 }
 
 func NewSubscriptionService(repo repositories.SubscriptionRepository, plans repositories.PlanRepository,
@@ -300,7 +302,11 @@ func (s *subscriptionService) MySubscription(ctx context.Context, userID string)
 	if err != nil {
 		return nil, repoError(err, "plan not found")
 	}
-	resp := &api.MySubscriptionResponse{Plan: mapping.PlanToResponse(plan), IsFree: sub == nil}
+	granted := false
+	if sub == nil {
+		plan, granted = s.grants.apply(ctx, userID, plan)
+	}
+	resp := &api.MySubscriptionResponse{Plan: mapping.PlanToResponse(plan), IsFree: sub == nil, Granted: granted}
 	if sub != nil {
 		resp.Subscription = mapping.SubscriptionToResponse(sub)
 		// The renewal costs the launch price the student keeps: the plan is shown at that price.
