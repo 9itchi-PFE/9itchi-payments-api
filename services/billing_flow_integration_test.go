@@ -153,7 +153,7 @@ func igNewEnv(t *testing.T) *igEnv {
 	promos.now = clock.Now
 	sales := NewSaleService(repos.Sale, repos.Plan).(*saleService)
 	sales.now = clock.Now
-	subs := NewSubscriptionService(repos.Subscription, priced, repos.Promo, repos.Payment, repos.Store, providers, &mocks.Publisher{}).(*subscriptionService)
+	subs := NewSubscriptionService(repos.Subscription, priced, repos.Promo, repos.Student, repos.Payment, repos.Store, providers, &mocks.Publisher{}).(*subscriptionService)
 	subs.now = clock.Now
 	return &igEnv{clock: clock, provider: fake, repos: repos, promos: promos, sales: sales, subs: subs,
 		plans: NewPlanService(repos.Plan, priced, repos.Subscription)}

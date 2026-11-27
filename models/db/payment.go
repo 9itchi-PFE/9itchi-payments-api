@@ -18,7 +18,9 @@ type Payment struct {
 	// SaleName is the sale the payment was opened in ("" when none): the receipt names it.
 	SaleName string `db:"sale_name" json:"sale_name"`
 	// LaunchMillimes is the launch price this payment charged before a promo code (nil: not a launch price).
-	LaunchMillimes *int64     `db:"launch_millimes" json:"launch_millimes"`
+	LaunchMillimes *int64 `db:"launch_millimes" json:"launch_millimes"`
+	// StudentPercent is the student discount taken off after any promo code (0: none).
+	StudentPercent int        `db:"student_percent" json:"student_percent"`
 	CompletedAt    *time.Time `db:"completed_at" json:"completed_at"`
 	// ReceiptNo is set when the payment completes; PeriodStart and PeriodEnd are the days it paid for.
 	ReceiptNo   *int64     `db:"receipt_no" json:"receipt_no"`

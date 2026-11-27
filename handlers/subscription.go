@@ -20,6 +20,7 @@ func Checkout(svc services.SubscriptionService) gin.HandlerFunc {
 			models.FormatError(c, &models.ApiError{Code: http.StatusBadRequest, Error: err})
 			return
 		}
+		req.Email, req.EmailVerified = c.GetString("email"), c.GetBool("email_verified")
 		result, apiErr := svc.Checkout(c.Request.Context(), c.GetString("user_id"), req)
 		if apiErr != nil {
 			models.FormatError(c, apiErr)

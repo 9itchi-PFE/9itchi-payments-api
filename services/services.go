@@ -20,6 +20,7 @@ type Services struct {
 	Issuer       IssuerService
 	Gift         GiftService
 	Sale         SaleService
+	Student      StudentDiscountService
 	Clients      *Clients
 }
 
@@ -38,10 +39,11 @@ func InitServices(config utils.AppConfig, repos *repositories.Repositories) *Ser
 		Erase:        NewEraseService(repos.Erase),
 		Plan:         NewPlanService(repos.Plan, priced, repos.Subscription),
 		Promo:        NewPromoService(repos.Promo, priced),
-		Subscription: NewSubscriptionService(repos.Subscription, priced, repos.Promo, repos.Payment, repos.Store, providers, events),
+		Subscription: NewSubscriptionService(repos.Subscription, priced, repos.Promo, repos.Student, repos.Payment, repos.Store, providers, events),
 		Issuer:       NewIssuerService(repos.Issuer),
 		Gift:         NewGiftService(repos.Gift, repos.Subscription, priced, repos.Store, events),
 		Sale:         NewSaleService(repos.Sale, repos.Plan),
+		Student:      NewStudentDiscountService(repos.Student),
 		Clients: &Clients{
 			Account: account.New(config.AccountAPIURL, config.InternalAPIKey),
 		},

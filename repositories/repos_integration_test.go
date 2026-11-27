@@ -806,6 +806,10 @@ func TestSaleRepository(t *testing.T) {
 	plain, err := pays.Create(ctx, &db.Payment{UserID: user, PlanID: free.ID, Provider: "flouci", AmountMillimes: 50000})
 	require.NoError(t, err)
 	assert.Empty(t, plain.SaleName)
+	assert.Zero(t, plain.StudentPercent)
+	student, err := pays.Create(ctx, &db.Payment{UserID: user, PlanID: free.ID, Provider: "flouci", AmountMillimes: 45000, DiscountMillimes: 5000, StudentPercent: 10})
+	require.NoError(t, err)
+	assert.Equal(t, 10, student.StudentPercent, "a payment keeps its student percentage")
 
 	require.NoError(t, repo.Delete(ctx, one.ID))
 	assert.ErrorIs(t, repo.Delete(ctx, one.ID), ErrNotFound)
@@ -867,4 +871,29 @@ func TestLaunchPriceKeptInRemindersAndRecords(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, p.LaunchMillimes)
 	assert.EqualValues(t, 35000, *p.LaunchMillimes)
+}
+
+func TestStudentDiscountRepository(t *testing.T) {
+	store := newTestStore(t)
+	repo := NewStudentDiscountRepository(store)
+	ctx := context.Background()
+
+	off, err := repo.Get(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, 0, off.Percent, "seeded switched off")
+	assert.Empty(t, off.Domains)
+
+	const admin = "0b8f9a52-6d0e-4e0a-9d43-2f7c1e0d5a11"
+	out, err := repo.Update(ctx, admin, &db.StudentDiscount{Percent: 20, Domains: []string{"enis.tn", "etudiant-isi.utm.tn"}})
+	require.NoError(t, err)
+	assert.Equal(t, 20, out.Percent)
+	assert.Equal(t, []string{"enis.tn", "etudiant-isi.utm.tn"}, out.Domains)
+	require.NotNil(t, out.UpdatedBy)
+
+	cleared, err := repo.Update(ctx, admin, &db.StudentDiscount{Percent: 0})
+	require.NoError(t, err)
+	assert.Empty(t, cleared.Domains)
+
+	_, err = repo.Update(ctx, admin, &db.StudentDiscount{Percent: 101})
+	assert.Error(t, err, "the check keeps the percent within 0..100")
 }
