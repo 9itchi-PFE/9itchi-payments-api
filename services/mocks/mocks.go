@@ -448,3 +448,22 @@ func (m *SaleRepository) Delete(_ context.Context, id string) error {
 	}
 	return repositories.ErrNotFound
 }
+
+type StudentDiscountRepository struct {
+	GetFn    func(ctx context.Context) (*db.StudentDiscount, error)
+	UpdateFn func(ctx context.Context, userID string, d *db.StudentDiscount) (*db.StudentDiscount, error)
+}
+
+func (m *StudentDiscountRepository) Get(ctx context.Context) (*db.StudentDiscount, error) {
+	if m.GetFn == nil {
+		return &db.StudentDiscount{Domains: []string{}}, nil
+	}
+	return m.GetFn(ctx)
+}
+
+func (m *StudentDiscountRepository) Update(ctx context.Context, userID string, d *db.StudentDiscount) (*db.StudentDiscount, error) {
+	if m.UpdateFn == nil {
+		return d, nil
+	}
+	return m.UpdateFn(ctx, userID, d)
+}

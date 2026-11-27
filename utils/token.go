@@ -24,6 +24,8 @@ type Claims struct {
 	Email string `json:"email"`
 	Role  string `json:"role"`
 	Type  string `json:"typ"`
+	// EmailVerified: a Google or LinkedIn sign-in vouched for Email (student discount).
+	EmailVerified bool `json:"email_verified,omitempty"`
 	jwt.RegisteredClaims
 }
 

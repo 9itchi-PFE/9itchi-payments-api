@@ -50,9 +50,11 @@ type SubscriptionService interface {
 }
 
 type subscriptionService struct {
-	repo      repositories.SubscriptionRepository
-	plans     repositories.PlanRepository
-	promos    repositories.PromoRepository
+	repo   repositories.SubscriptionRepository
+	plans  repositories.PlanRepository
+	promos repositories.PromoRepository
+	// students is the student discount; nil means none.
+	students  repositories.StudentDiscountRepository
 	payments  repositories.PaymentRepository
 	tx        repositories.Transactor
 	providers core.ProviderFactory
@@ -61,9 +63,9 @@ type subscriptionService struct {
 }
 
 func NewSubscriptionService(repo repositories.SubscriptionRepository, plans repositories.PlanRepository,
-	promos repositories.PromoRepository, payments repositories.PaymentRepository, tx repositories.Transactor,
-	providers core.ProviderFactory, events core.Publisher) SubscriptionService {
-	return &subscriptionService{repo: repo, plans: plans, promos: promos, payments: payments, tx: tx,
+	promos repositories.PromoRepository, students repositories.StudentDiscountRepository, payments repositories.PaymentRepository,
+	tx repositories.Transactor, providers core.ProviderFactory, events core.Publisher) SubscriptionService {
+	return &subscriptionService{repo: repo, plans: plans, promos: promos, students: students, payments: payments, tx: tx,
 		providers: providers, events: events, now: time.Now}
 }
 
@@ -99,6 +101,18 @@ func (s *subscriptionService) price(ctx context.Context, plan *db.Plan, code str
 	return final, amount - final, &promo.ID, nil
 }
 
+// studentPercent is the student discount the buyer gets (0: none). Only a verified email on a student domain counts.
+func (s *subscriptionService) studentPercent(ctx context.Context, email string, verified bool) (int, *models.ApiError) {
+	if s.students == nil || !verified {
+		return 0, nil
+	}
+	d, err := s.students.Get(ctx)
+	if err != nil {
+		return 0, repoError(err, "student discount not found")
+	}
+	return studentPercent(d, email, verified), nil
+}
+
 func (s *subscriptionService) Checkout(ctx context.Context, userID string, req api.CheckoutRequest) (*api.CheckoutResponse, *models.ApiError) {
 	if !isUUID(userID) {
 		return nil, badRequest("invalid user id")
@@ -124,8 +138,17 @@ func (s *subscriptionService) Checkout(ctx context.Context, userID string, req a
 	if apiErr != nil {
 		return nil, apiErr
 	}
+	student, apiErr := s.studentPercent(ctx, req.Email, req.EmailVerified)
+	if apiErr != nil {
+		return nil, apiErr
+	}
+	if student > 0 {
+		// On top of the sale and the promo code: the percentage of what is left.
+		off := amount * int64(student) / 100
+		amount, discount = amount-off, discount+off
+	}
 	pay := &db.Payment{UserID: userID, PlanID: plan.ID, PromoCodeID: promoID, Provider: checkoutProvider,
-		AmountMillimes: amount, DiscountMillimes: discount, LaunchMillimes: launch}
+		AmountMillimes: amount, DiscountMillimes: discount, LaunchMillimes: launch, StudentPercent: student}
 	if plan.RegularPrice != nil {
 		regular := millimes(*plan.RegularPrice)
 		pay.RegularMillimes = &regular
@@ -343,7 +366,7 @@ const maxReceipts = 200
 // paymentResponse adds the plan and the promo code to a payment. A plan or code deleted since is left empty.
 func (s *subscriptionService) paymentResponse(ctx context.Context, pay *db.Payment, plans map[string]*db.Plan) api.PaymentResponse {
 	res := api.PaymentResponse{
-		ID: pay.ID, Status: pay.Status, PlanID: pay.PlanID, AmountMillimes: pay.AmountMillimes, DiscountMillimes: pay.DiscountMillimes, RegularMillimes: pay.RegularMillimes, SaleName: pay.SaleName,
+		ID: pay.ID, Status: pay.Status, PlanID: pay.PlanID, AmountMillimes: pay.AmountMillimes, DiscountMillimes: pay.DiscountMillimes, RegularMillimes: pay.RegularMillimes, SaleName: pay.SaleName, StudentPercent: pay.StudentPercent,
 		Provider: pay.Provider, PeriodStart: pay.PeriodStart, PeriodEnd: pay.PeriodEnd, CompletedAt: pay.CompletedAt, CreatedAt: pay.CreatedAt,
 	}
 	if pay.ProviderRef != nil {

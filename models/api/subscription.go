@@ -6,6 +6,9 @@ import "time"
 type CheckoutRequest struct {
 	PlanID    string `json:"plan_id" binding:"required,uuid"`
 	PromoCode string `json:"promo_code" binding:"max=64"`
+	// Email and EmailVerified come from the access token (never from the body): they decide the student discount.
+	Email         string `json:"-"`
+	EmailVerified bool   `json:"-"`
 }
 
 // CheckoutResponse tells the client where to pay. PaymentURL is empty when nothing is due (activated directly).
@@ -57,14 +60,16 @@ type PaymentResponse struct {
 	// RegularMillimes is the regular price of the plan that day, when it had one: the receipt shows the difference.
 	RegularMillimes *int64 `json:"regular_millimes,omitempty"`
 	// SaleName is the sale the payment was opened in, when there was one.
-	SaleName    string     `json:"sale_name,omitempty"`
-	PromoCode   string     `json:"promo_code"`
-	Provider    string     `json:"provider"`
-	ProviderRef string     `json:"provider_ref"`
-	PeriodStart *time.Time `json:"period_start"`
-	PeriodEnd   *time.Time `json:"period_end"`
-	CompletedAt *time.Time `json:"completed_at"`
-	CreatedAt   time.Time  `json:"created_at"`
+	SaleName string `json:"sale_name,omitempty"`
+	// StudentPercent is the student discount taken off, when there was one (part of DiscountMillimes).
+	StudentPercent int        `json:"student_percent,omitempty"`
+	PromoCode      string     `json:"promo_code"`
+	Provider       string     `json:"provider"`
+	ProviderRef    string     `json:"provider_ref"`
+	PeriodStart    *time.Time `json:"period_start"`
+	PeriodEnd      *time.Time `json:"period_end"`
+	CompletedAt    *time.Time `json:"completed_at"`
+	CreatedAt      time.Time  `json:"created_at"`
 }
 
 // PaymentListResponse wraps the user's completed payments, newest first.
