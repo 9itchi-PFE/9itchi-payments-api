@@ -21,6 +21,7 @@ type Services struct {
 	Gift         GiftService
 	Sale         SaleService
 	Student      StudentDiscountService
+	FreeGrant    FreeGrantService
 	Clients      *Clients
 }
 
@@ -35,17 +36,25 @@ func InitServices(config utils.AppConfig, repos *repositories.Repositories) *Ser
 	// keeps the plans as they were typed.
 	priced := PricedPlans(repos.Plan, repos.Sale, time.Now)
 	events := core.NewPublisher(config.RabbitMQURL)
+	accounts := account.New(config.AccountAPIURL, config.InternalAPIKey)
+	// The free usage given to emails is laid over the Free plan wherever a student's plan is read.
+	grants := &freeGrants{repo: repos.FreeGrant, users: accounts}
+	plans := NewPlanService(repos.Plan, priced, repos.Subscription).(*planService)
+	plans.grants = grants
+	subs := NewSubscriptionService(repos.Subscription, priced, repos.Promo, repos.Student, repos.Payment, repos.Store, providers, events).(*subscriptionService)
+	subs.grants = grants
 	return &Services{
 		Erase:        NewEraseService(repos.Erase),
-		Plan:         NewPlanService(repos.Plan, priced, repos.Subscription),
+		Plan:         plans,
 		Promo:        NewPromoService(repos.Promo, priced),
-		Subscription: NewSubscriptionService(repos.Subscription, priced, repos.Promo, repos.Student, repos.Payment, repos.Store, providers, events),
+		Subscription: subs,
 		Issuer:       NewIssuerService(repos.Issuer),
 		Gift:         NewGiftService(repos.Gift, repos.Subscription, priced, repos.Store, events),
 		Sale:         NewSaleService(repos.Sale, repos.Plan),
 		Student:      NewStudentDiscountService(repos.Student),
+		FreeGrant:    NewFreeGrantService(repos.FreeGrant),
 		Clients: &Clients{
-			Account: account.New(config.AccountAPIURL, config.InternalAPIKey),
+			Account: accounts,
 		},
 	}
 }

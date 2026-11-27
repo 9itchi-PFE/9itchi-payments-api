@@ -66,6 +66,10 @@ func initializeRoutes(r *gin.Engine, services *services.Services) {
 		adminGroup.GET("/admin/users/:id/payments", handlers.UserPayments(services.Subscription))
 		adminGroup.GET("/admin/users/:id/gifts", handlers.ListGifts(services.Gift))
 		adminGroup.POST("/admin/users/:id/gifts", handlers.GiveMonth(services.Gift))
+		adminGroup.GET("/admin/free-grants", handlers.ListFreeGrants(services.FreeGrant))
+		adminGroup.POST("/admin/free-grants", handlers.GiveFreeGrants(services.FreeGrant))
+		adminGroup.PUT("/admin/free-grants/:email", handlers.UpdateFreeGrant(services.FreeGrant))
+		adminGroup.DELETE("/admin/free-grants/:email", handlers.DeleteFreeGrant(services.FreeGrant))
 	}
 
 	// internal endpoints

@@ -37,6 +37,8 @@ type MySubscriptionResponse struct {
 	Subscription *SubscriptionResponse `json:"subscription"`
 	Plan         PlanResponse          `json:"plan"`
 	IsFree       bool                  `json:"is_free"`
+	// Granted is set on the Free view when the team gave the user's email free usage: Plan.Quotas include it.
+	Granted bool `json:"granted"`
 	// Lapsed is set on the Free view when the last subscription ended without its renewal being paid and the
 	// student had not stopped it: the renewal is still due.
 	Lapsed *SubscriptionResponse `json:"lapsed"`

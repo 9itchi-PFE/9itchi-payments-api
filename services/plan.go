@@ -36,6 +36,8 @@ type planService struct {
 	// priced reads the same plans at today's price, sales included: what students are shown.
 	priced repositories.PlanRepository
 	subs   repositories.SubscriptionRepository
+	// grants is the free usage given to emails, laid over the Free plan (nil: none).
+	grants *freeGrants
 }
 
 func NewPlanService(repo, priced repositories.PlanRepository, subs repositories.SubscriptionRepository) PlanService {
@@ -213,6 +215,9 @@ func (s *planService) GetQuotas(ctx context.Context, userID string) (*api.Quotas
 	sub, plan, err := userPlan(ctx, s.subs, s.repo, userID)
 	if err != nil {
 		return nil, repoError(err, "plan not found")
+	}
+	if sub == nil {
+		plan, _ = s.grants.apply(ctx, userID, plan)
 	}
 	quotas := plan.Quotas
 	if quotas == nil {

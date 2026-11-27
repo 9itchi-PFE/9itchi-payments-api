@@ -8,6 +8,7 @@ import (
 
 	"9itchi-payments-api/core"
 	"9itchi-payments-api/models/db"
+	"9itchi-payments-api/pkg/account"
 	"9itchi-payments-api/repositories"
 )
 
@@ -466,4 +467,63 @@ func (m *StudentDiscountRepository) Update(ctx context.Context, userID string, d
 		return d, nil
 	}
 	return m.UpdateFn(ctx, userID, d)
+}
+
+type FreeGrantRepository struct {
+	ListFn   func(ctx context.Context) ([]db.FreeGrant, error)
+	GetFn    func(ctx context.Context, email string) (*db.FreeGrant, error)
+	UpsertFn func(ctx context.Context, adminID string, emails []string, quotas map[string]int, note string) ([]db.FreeGrant, error)
+	UpdateFn func(ctx context.Context, adminID, email string, quotas map[string]int, note string) (*db.FreeGrant, error)
+	DeleteFn func(ctx context.Context, email string) error
+}
+
+func (m *FreeGrantRepository) List(ctx context.Context) ([]db.FreeGrant, error) {
+	if m.ListFn == nil {
+		return nil, nil
+	}
+	return m.ListFn(ctx)
+}
+
+func (m *FreeGrantRepository) Get(ctx context.Context, email string) (*db.FreeGrant, error) {
+	if m.GetFn == nil {
+		return nil, repositories.ErrNotFound
+	}
+	return m.GetFn(ctx, email)
+}
+
+func (m *FreeGrantRepository) Upsert(ctx context.Context, adminID string, emails []string, quotas map[string]int, note string) ([]db.FreeGrant, error) {
+	if m.UpsertFn == nil {
+		out := make([]db.FreeGrant, 0, len(emails))
+		for _, e := range emails {
+			out = append(out, db.FreeGrant{Email: e, Quotas: quotas, Note: note})
+		}
+		return out, nil
+	}
+	return m.UpsertFn(ctx, adminID, emails, quotas, note)
+}
+
+func (m *FreeGrantRepository) Update(ctx context.Context, adminID, email string, quotas map[string]int, note string) (*db.FreeGrant, error) {
+	if m.UpdateFn == nil {
+		return &db.FreeGrant{Email: email, Quotas: quotas, Note: note}, nil
+	}
+	return m.UpdateFn(ctx, adminID, email, quotas, note)
+}
+
+func (m *FreeGrantRepository) Delete(ctx context.Context, email string) error {
+	if m.DeleteFn == nil {
+		return nil
+	}
+	return m.DeleteFn(ctx, email)
+}
+
+// Users is a fake account-api directory.
+type Users struct {
+	UserFn func(ctx context.Context, id string) (*account.User, error)
+}
+
+func (m *Users) User(ctx context.Context, id string) (*account.User, error) {
+	if m.UserFn == nil {
+		return nil, repositories.ErrNotFound
+	}
+	return m.UserFn(ctx, id)
 }
