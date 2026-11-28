@@ -302,10 +302,8 @@ func (s *subscriptionService) MySubscription(ctx context.Context, userID string)
 	if err != nil {
 		return nil, repoError(err, "plan not found")
 	}
-	granted := false
-	if sub == nil {
-		plan, granted = s.grants.apply(ctx, userID, plan)
-	}
+	plan, granted := s.grants.apply(ctx, userID, plan, sub != nil)
+	granted = granted && sub == nil
 	resp := &api.MySubscriptionResponse{Plan: mapping.PlanToResponse(plan), IsFree: sub == nil, Granted: granted}
 	if sub != nil {
 		resp.Subscription = mapping.SubscriptionToResponse(sub)

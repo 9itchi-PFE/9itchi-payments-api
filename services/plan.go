@@ -216,9 +216,7 @@ func (s *planService) GetQuotas(ctx context.Context, userID string) (*api.Quotas
 	if err != nil {
 		return nil, repoError(err, "plan not found")
 	}
-	if sub == nil {
-		plan, _ = s.grants.apply(ctx, userID, plan)
-	}
+	plan, _ = s.grants.apply(ctx, userID, plan, sub != nil)
 	quotas := plan.Quotas
 	if quotas == nil {
 		quotas = map[string]int{}
