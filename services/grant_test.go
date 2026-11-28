@@ -113,10 +113,20 @@ func TestFreeGrantsApply(t *testing.T) {
 	}
 
 	g := &freeGrants{repo: grants, users: user("Ali@Enis.tn", true, nil)}
-	out, ok := g.apply(ctx, userID, free)
+	out, ok := g.apply(ctx, userID, free, false)
 	require.True(t, ok)
 	assert.Equal(t, map[string]int{"resumes": 1, "free_applications": 5, "cv_edit": 0}, out.Quotas)
 	assert.Equal(t, 0, free.Quotas["resumes"], "the Free plan itself is untouched")
+
+	// A paid plan keeps the more generous value: grant 100 > 6, plan 15 > 2, unlimited (missing) stays.
+	paid := &db.Plan{ID: "p", Name: "Sprint PFE", Quotas: map[string]int{"recruiter_searches_per_day": 6, "ai_scores_per_day": 15}}
+	gen := &freeGrants{repo: &mocks.FreeGrantRepository{GetFn: func(context.Context, string) (*db.FreeGrant, error) {
+		return &db.FreeGrant{Quotas: map[string]int{"recruiter_searches_per_day": 100, "ai_scores_per_day": 2, "resumes": 1}}, nil
+	}}, users: user("ali@enis.tn", true, nil)}
+	out, ok = gen.apply(ctx, userID, paid, true)
+	require.True(t, ok)
+	assert.Equal(t, map[string]int{"recruiter_searches_per_day": 100, "ai_scores_per_day": 15}, out.Quotas)
+	assert.Equal(t, 6, paid.Quotas["recruiter_searches_per_day"], "the paid plan itself is untouched")
 
 	cases := map[string]*freeGrants{
 		"unverified email": {repo: grants, users: user("ali@enis.tn", false, nil)},
@@ -128,7 +138,7 @@ func TestFreeGrantsApply(t *testing.T) {
 		"no resolver": nil,
 	}
 	for name, g := range cases {
-		out, ok := g.apply(ctx, userID, free)
+		out, ok := g.apply(ctx, userID, free, false)
 		assert.False(t, ok, name)
 		assert.Same(t, free, out, name)
 	}

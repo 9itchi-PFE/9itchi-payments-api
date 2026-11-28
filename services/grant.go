@@ -140,10 +140,11 @@ type freeGrants struct {
 	users UserDirectory
 }
 
-// apply returns the Free plan with the user's grant laid over it key by key, and whether a grant applied. Only an
-// email vouched for by a Google or LinkedIn sign-in counts: anyone could sign up with a password on someone else's
-// email. When the grant cannot be read the student gets the plain Free plan (logged), never an error.
-func (g *freeGrants) apply(ctx context.Context, userID string, free *db.Plan) (*db.Plan, bool) {
+// apply returns the plan with the user's grant laid over it key by key, and whether a grant applied. On the Free
+// plan the grant wins; on a paid plan (paid) the more generous of the two wins, so a subscription never loses usage.
+// Only an email vouched for by a Google or LinkedIn sign-in counts: anyone could sign up with a password on someone
+// else's email. When the grant cannot be read the student gets the plain plan (logged), never an error.
+func (g *freeGrants) apply(ctx context.Context, userID string, free *db.Plan, paid bool) (*db.Plan, bool) {
 	if g == nil || g.repo == nil || g.users == nil || free == nil {
 		return free, false
 	}
@@ -168,7 +169,14 @@ func (g *freeGrants) apply(ctx context.Context, userID string, free *db.Plan) (*
 		out.Quotas[k] = v
 	}
 	for k, v := range grant.Quotas {
-		out.Quotas[k] = v
+		if !paid {
+			out.Quotas[k] = v
+			continue
+		}
+		// A paid plan keeps what it gives when it is more: missing or negative = unlimited.
+		if cur, ok := out.Quotas[k]; ok && cur >= 0 && (v < 0 || v > cur) {
+			out.Quotas[k] = v
+		}
 	}
 	return &out, true
 }
